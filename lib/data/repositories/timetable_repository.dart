@@ -326,19 +326,29 @@ class TimetableRepository {
   }
 
   /// Upcoming sessions for a specific subject (from today onwards), max 10.
+  /// Filters and sorts client-side to avoid requiring a composite Firestore index.
   Stream<List<ClassSession>> upcomingSessionsForSubject(String subjectId) {
-    final startOfToday = DateTime.now();
-    final todayTs = Timestamp.fromDate(
-        DateTime(startOfToday.year, startOfToday.month, startOfToday.day));
+    final startOfToday = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+    );
 
+    // Only filter by subjectId in Firestore (single-field index, always exists)
     return _sessionsCol
         .where('subjectId', isEqualTo: subjectId)
-        .where('date', isGreaterThanOrEqualTo: todayTs)
-        .orderBy('date')
-        .limit(10)
         .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => ClassSession.fromMap(d.data())).toList());
+        .map((snap) {
+      final all = snap.docs
+          .map((d) => ClassSession.fromMap(d.data()))
+          .toList();
+      // Filter future sessions and sort by date client-side
+      final upcoming = all
+          .where((s) => !s.date.isBefore(startOfToday))
+          .toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+      return upcoming.take(10).toList();
+    });
   }
 
 

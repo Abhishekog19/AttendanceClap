@@ -115,15 +115,19 @@ class FirestoreDatasource {
   }
 
   /// Stream of logs for a single subject, most recent first.
+  /// Sorts client-side to avoid requiring a composite (subjectId + date) index.
   Stream<List<AttendanceLogModel>> watchLogsForSubject(
       String uid, String subjectId) {
     return _logsRef(uid)
         .where('subjectId', isEqualTo: subjectId)
-        .orderBy('date', descending: true)
         .snapshots()
-        .map((snap) => snap.docs
-            .map((doc) => AttendanceLogModel.fromJson(doc.data(), doc.id))
-            .toList());
+        .map((snap) {
+      final logs = snap.docs
+          .map((doc) => AttendanceLogModel.fromJson(doc.data(), doc.id))
+          .toList();
+      logs.sort((a, b) => b.date.compareTo(a.date)); // most recent first
+      return logs;
+    });
   }
 
   /// Writes a log and atomically bumps the subject counters.
@@ -206,11 +210,12 @@ class FirestoreDatasource {
       String uid, String subjectId) async {
     final snap = await _logsRef(uid)
         .where('subjectId', isEqualTo: subjectId)
-        .orderBy('date', descending: true)
         .get();
-    return snap.docs
+    final logs = snap.docs
         .map((doc) => AttendanceLogModel.fromJson(doc.data(), doc.id))
         .toList();
+    logs.sort((a, b) => b.date.compareTo(a.date)); // most recent first
+    return logs;
   }
 
   Future<List<AttendanceLogModel>> getLogsInRange(
