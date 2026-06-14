@@ -325,6 +325,23 @@ class TimetableRepository {
             snap.docs.map((d) => ClassSession.fromMap(d.data())).toList());
   }
 
+  /// Upcoming sessions for a specific subject (from today onwards), max 10.
+  Stream<List<ClassSession>> upcomingSessionsForSubject(String subjectId) {
+    final startOfToday = DateTime.now();
+    final todayTs = Timestamp.fromDate(
+        DateTime(startOfToday.year, startOfToday.month, startOfToday.day));
+
+    return _sessionsCol
+        .where('subjectId', isEqualTo: subjectId)
+        .where('date', isGreaterThanOrEqualTo: todayTs)
+        .orderBy('date')
+        .limit(10)
+        .snapshots()
+        .map((snap) =>
+            snap.docs.map((d) => ClassSession.fromMap(d.data())).toList());
+  }
+
+
   // ── Update attendance on a session ───────────────────────────────────────
 
   Future<void> markAttendance(

@@ -20,6 +20,8 @@ import '../../features/predictor/screens/predictor_screen.dart';
 import '../../features/analytics/screens/analytics_screen.dart';
 import '../../features/premium/screens/premium_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
+import '../../features/subjects/screens/subject_detail_screen.dart';
+import '../../features/attendance/screens/attendance_history_screen.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../shared/widgets/main_shell.dart';
 import '../../data/models/subject_model.dart';
@@ -110,7 +112,21 @@ GoRouter appRouter(Ref ref) {
               return AddEditSubjectScreen(subject: subject);
             },
           ),
+          GoRoute(
+            path: 'detail',
+            name: 'subjectDetail',
+            builder: (context, state) {
+              final subject = state.extra as SubjectModel;
+              return SubjectDetailScreen(subject: subject);
+            },
+          ),
         ],
+      ),
+      // ─── Attendance History ────────────────────────────────────────────────────
+      GoRoute(
+        path: '/attendance/history',
+        name: 'attendanceHistory',
+        builder: (context, state) => const AttendanceHistoryScreen(),
       ),
       GoRoute(
         path: '/premium',

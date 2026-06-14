@@ -103,23 +103,37 @@ class FirestoreDatasource {
   CollectionReference<Map<String, dynamic>> _logsRef(String uid) =>
       _userDoc(uid).collection('attendance_logs');
 
+  /// Stream of all logs, most recent first (capped at 500).
   Stream<List<AttendanceLogModel>> watchAttendanceLogs(String uid) {
     return _logsRef(uid)
         .orderBy('date', descending: true)
-        .limit(200)
+        .limit(500)
         .snapshots()
         .map((snap) => snap.docs
             .map((doc) => AttendanceLogModel.fromJson(doc.data(), doc.id))
             .toList());
   }
 
+  /// Stream of logs for a single subject, most recent first.
+  Stream<List<AttendanceLogModel>> watchLogsForSubject(
+      String uid, String subjectId) {
+    return _logsRef(uid)
+        .where('subjectId', isEqualTo: subjectId)
+        .orderBy('date', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((doc) => AttendanceLogModel.fromJson(doc.data(), doc.id))
+            .toList());
+  }
+
+  /// Writes a log and atomically bumps the subject counters.
   Future<void> logAttendance(String uid, AttendanceLogModel log) async {
     final batch = _db.batch();
-    // Add log
     batch.set(_logsRef(uid).doc(log.id), log.toJson());
-    // Update subject counters
+
     final subjectRef = _subjectsRef(uid).doc(log.subjectId);
-    if (log.status == AttendanceStatus.present) {
+    if (log.status == AttendanceStatus.present ||
+        log.status == AttendanceStatus.late) {
       batch.update(subjectRef, {
         'attendedClasses': FieldValue.increment(1),
         'totalClasses': FieldValue.increment(1),
@@ -130,6 +144,60 @@ class FirestoreDatasource {
         'totalClasses': FieldValue.increment(1),
         'updatedAt': FieldValue.serverTimestamp(),
       });
+    }
+    // cancelled: no counter change
+    await batch.commit();
+  }
+
+  /// Updates an existing log's status, correcting subject counters by delta.
+  Future<void> updateAttendanceLog(
+    String uid,
+    AttendanceLogModel log,
+    AttendanceStatus oldStatus,
+  ) async {
+    final batch = _db.batch();
+    batch.set(_logsRef(uid).doc(log.id), log.toJson());
+
+    final subjectRef = _subjectsRef(uid).doc(log.subjectId);
+    final delta = _counterDelta(oldStatus: oldStatus, newStatus: log.status);
+    if (delta['attendedClasses'] != 0 || delta['totalClasses'] != 0) {
+      final update = <String, dynamic>{
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+      if (delta['attendedClasses'] != 0) {
+        update['attendedClasses'] =
+            FieldValue.increment(delta['attendedClasses']!);
+      }
+      if (delta['totalClasses'] != 0) {
+        update['totalClasses'] =
+            FieldValue.increment(delta['totalClasses']!);
+      }
+      batch.update(subjectRef, update);
+    }
+    await batch.commit();
+  }
+
+  /// Deletes a log and reverses the counter changes it originally applied.
+  Future<void> deleteAttendanceLog(String uid, AttendanceLogModel log) async {
+    final batch = _db.batch();
+    batch.delete(_logsRef(uid).doc(log.id));
+
+    final subjectRef = _subjectsRef(uid).doc(log.subjectId);
+    // Reverse the effect of the original status
+    final delta = _counterDelta(oldStatus: log.status, newStatus: AttendanceStatus.cancelled);
+    if (delta['attendedClasses'] != 0 || delta['totalClasses'] != 0) {
+      final update = <String, dynamic>{
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+      if (delta['attendedClasses'] != 0) {
+        update['attendedClasses'] =
+            FieldValue.increment(delta['attendedClasses']!);
+      }
+      if (delta['totalClasses'] != 0) {
+        update['totalClasses'] =
+            FieldValue.increment(delta['totalClasses']!);
+      }
+      batch.update(subjectRef, update);
     }
     await batch.commit();
   }
@@ -156,4 +224,34 @@ class FirestoreDatasource {
         .map((doc) => AttendanceLogModel.fromJson(doc.data(), doc.id))
         .toList();
   }
+
+  /// Computes the signed counter delta when changing from [oldStatus] → [newStatus].
+  static Map<String, int> _counterDelta({
+    required AttendanceStatus oldStatus,
+    required AttendanceStatus newStatus,
+  }) {
+    int attended = 0;
+    int total = 0;
+
+    // Remove old effect
+    if (oldStatus == AttendanceStatus.present ||
+        oldStatus == AttendanceStatus.late) {
+      attended -= 1;
+      total -= 1;
+    } else if (oldStatus == AttendanceStatus.absent) {
+      total -= 1;
+    }
+
+    // Apply new effect
+    if (newStatus == AttendanceStatus.present ||
+        newStatus == AttendanceStatus.late) {
+      attended += 1;
+      total += 1;
+    } else if (newStatus == AttendanceStatus.absent) {
+      total += 1;
+    }
+
+    return {'attendedClasses': attended, 'totalClasses': total};
+  }
 }
+

@@ -133,15 +133,29 @@ class DashboardScreen extends ConsumerWidget {
                           'Subject Overview',
                           style: AppTextStyles.headlineMd.copyWith(color: onSurface),
                         ),
-                        TextButton(
-                          onPressed: () => context.push('/subjects'),
-                          child: Text(
-                            'View All',
-                            style: AppTextStyles.labelMd.copyWith(
-                              color: primary,
-                              fontWeight: FontWeight.w600,
+                        Row(
+                          children: [
+                            TextButton(
+                              onPressed: () => context.push('/attendance/history'),
+                              child: Text(
+                                'History',
+                                style: AppTextStyles.labelMd.copyWith(
+                                  color: onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
-                          ),
+                            TextButton(
+                              onPressed: () => context.push('/subjects'),
+                              child: Text(
+                                'View All',
+                                style: AppTextStyles.labelMd.copyWith(
+                                  color: primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -162,7 +176,7 @@ class DashboardScreen extends ConsumerWidget {
                               child: SubjectCard(
                                 subject: subject,
                                 targetPercent: data.attendanceGoal,
-                                onTap: () => context.push('/subjects'),
+                                onTap: () => context.push('/subjects/detail', extra: subject),
                               ),
                             ),
                           ),

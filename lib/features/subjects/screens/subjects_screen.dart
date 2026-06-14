@@ -66,11 +66,14 @@ class SubjectsScreen extends ConsumerWidget {
               final subject = subjects[i];
               return Padding(
                 padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                child: _SubjectListTile(
-                  subject: subject,
-                  goal: goal,
-                  onEdit: () => context.push('/subjects/edit', extra: subject),
-                  onDelete: () => _confirmDelete(context, ref, subject),
+                child: GestureDetector(
+                  onTap: () => context.push('/subjects/detail', extra: subject),
+                  child: _SubjectListTile(
+                    subject: subject,
+                    goal: goal,
+                    onEdit: () => context.push('/subjects/edit', extra: subject),
+                    onDelete: () => _confirmDelete(context, ref, subject),
+                  ),
                 ),
               );
             },
