@@ -2,8 +2,11 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../../core/utils/attendance_calculator.dart';
-import '../../../data/models/attendance_log_model.dart' as log_model;
+// Use prefix 'calc' so its AttendanceStatus (excellent/good/safe/risky/critical) doesn't clash
+import '../../../core/utils/attendance_calculator.dart' as calc;
+// Log model's AttendanceStatus (present/absent/late/cancelled) is the default bare name
+import '../../../data/models/attendance_log_model.dart';
+// Hide class_session_model's conflicting AttendanceStatus enum
 import '../../../data/models/class_session_model.dart' hide AttendanceStatus;
 import '../../../data/models/subject_model.dart';
 import '../../../data/repositories/attendance_repository.dart';
@@ -16,9 +19,7 @@ part 'subject_detail_provider.g.dart';
 // ── Upcoming sessions for a subject ──────────────────────────────────────────
 
 @riverpod
-Stream<List<ClassSession>> upcomingSessions(
-    Ref ref, String subjectId) {
-  // Watch all sessions and filter client-side (avoids composite index requirement)
+Stream<List<ClassSession>> upcomingSessions(Ref ref, String subjectId) {
   return ref
       .watch(timetableRepositoryProvider)
       .upcomingSessionsForSubject(subjectId);
@@ -27,18 +28,18 @@ Stream<List<ClassSession>> upcomingSessions(
 // ── Logs stream for a single subject ─────────────────────────────────────────
 
 @riverpod
-Stream<List<log_model.AttendanceLogModel>> subjectLogsStream(
+Stream<List<AttendanceLogModel>> subjectLogsStream(
     Ref ref, String subjectId) {
   return ref
       .watch(attendanceRepositoryProvider)
       .watchLogsForSubject(subjectId);
 }
 
-// ── Subject detail data bundle ─────────────────────────────────────────────────
+// ── Subject detail data bundle ────────────────────────────────────────────────
 
 class SubjectDetailData {
   final SubjectModel subject;
-  final List<log_model.AttendanceLogModel> logs;
+  final List<AttendanceLogModel> logs;
   final List<ClassSession> upcomingSessions;
   final double goal;
 
@@ -53,20 +54,20 @@ class SubjectDetailData {
 
   double get percentage => subject.attendancePercentage;
 
-  int get safeBunks => AttendanceCalculator.getSafeBunks(
+  int get safeBunks => calc.AttendanceCalculator.getSafeBunks(
         attended: subject.attendedClasses,
         total: subject.totalClasses,
         targetPercent: goal,
       );
 
-  int get classesNeeded => AttendanceCalculator.getClassesNeeded(
+  int get classesNeeded => calc.AttendanceCalculator.getClassesNeeded(
         attended: subject.attendedClasses,
         total: subject.totalClasses,
         targetPercent: goal,
       );
 
-  AttendanceStatus get riskLevel =>
-      AttendanceCalculator.getStatus(percentage, target: goal);
+  calc.AttendanceStatus get riskLevel =>
+      calc.AttendanceCalculator.getStatus(percentage, target: goal);
 
   // ── Trend chart data ──────────────────────────────────────────────────────
 
@@ -85,8 +86,8 @@ class SubjectDetailData {
       final total = dayLogs.length;
       final present = dayLogs
           .where((l) =>
-              l.status == log_model.AttendanceStatus.present ||
-              l.status == log_model.AttendanceStatus.late)
+              l.status == AttendanceStatus.present ||
+              l.status == AttendanceStatus.late)
           .length;
       spots.add(
           FlSpot((6 - i).toDouble(), total == 0 ? 0 : (present / total) * 100));
@@ -108,8 +109,8 @@ class SubjectDetailData {
       final total = weekLogs.length;
       final present = weekLogs
           .where((l) =>
-              l.status == log_model.AttendanceStatus.present ||
-              l.status == log_model.AttendanceStatus.late)
+              l.status == AttendanceStatus.present ||
+              l.status == AttendanceStatus.late)
           .length;
       spots.add(
           FlSpot((3 - w).toDouble(), total == 0 ? 0 : (present / total) * 100));
@@ -117,14 +118,14 @@ class SubjectDetailData {
     return spots;
   }
 
-  // ── Log stats ──────────────────────────────────────────────────────────────
+  // ── Log stats ─────────────────────────────────────────────────────────────
 
   int get presentCount =>
-      logs.where((l) => l.status == log_model.AttendanceStatus.present).length;
+      logs.where((l) => l.status == AttendanceStatus.present).length;
   int get absentCount =>
-      logs.where((l) => l.status == log_model.AttendanceStatus.absent).length;
+      logs.where((l) => l.status == AttendanceStatus.absent).length;
   int get lateCount =>
-      logs.where((l) => l.status == log_model.AttendanceStatus.late).length;
+      logs.where((l) => l.status == AttendanceStatus.late).length;
 }
 
 // ── Subject detail period ─────────────────────────────────────────────────────
@@ -147,7 +148,6 @@ AsyncValue<SubjectDetailData> subjectDetail(Ref ref, String subjectId) {
   final sessionsAsync = ref.watch(upcomingSessionsProvider(subjectId));
   final goal = ref.watch(attendanceGoalProvider);
 
-  // Wait for subjects and logs; sessions are optional (empty if not loaded)
   final subjects = subjectsAsync.valueOrNull;
   final logs = logsAsync.valueOrNull;
 
@@ -155,13 +155,16 @@ AsyncValue<SubjectDetailData> subjectDetail(Ref ref, String subjectId) {
     return const AsyncLoading();
   }
 
-  if (subjectsAsync.hasError) return AsyncError(subjectsAsync.error!, subjectsAsync.stackTrace!);
-  if (logsAsync.hasError) return AsyncError(logsAsync.error!, logsAsync.stackTrace!);
+  if (subjectsAsync.hasError) {
+    return AsyncError(subjectsAsync.error!, subjectsAsync.stackTrace!);
+  }
+  if (logsAsync.hasError) {
+    return AsyncError(logsAsync.error!, logsAsync.stackTrace!);
+  }
 
   final subject = subjects?.where((s) => s.id == subjectId).firstOrNull;
   if (subject == null) {
-    return AsyncError(
-        Exception('Subject not found'), StackTrace.current);
+    return AsyncError(Exception('Subject not found'), StackTrace.current);
   }
 
   return AsyncData(SubjectDetailData(

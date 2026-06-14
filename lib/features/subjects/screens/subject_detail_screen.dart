@@ -7,11 +7,11 @@ import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
-// attendance_calculator.dart exports AttendanceStatus (excellent/good/safe/risky/critical)
-import '../../../core/utils/attendance_calculator.dart';
-// Import log model with alias; its AttendanceStatus differs from calculator's
-import '../../../data/models/attendance_log_model.dart' as log_model;
-// class_session_model.dart also has AttendanceStatus — hide it to prevent ambiguity
+// calc prefix so its AttendanceStatus (excellent/good/safe/risky/critical) doesn't clash
+import '../../../core/utils/attendance_calculator.dart' as calc;
+// Log model's AttendanceStatus (present/absent/late/cancelled) is default bare name
+import '../../../data/models/attendance_log_model.dart';
+// Hide class_session_model's conflicting AttendanceStatus
 import '../../../data/models/class_session_model.dart' hide AttendanceStatus;
 import '../../../data/models/subject_model.dart';
 import '../../../data/repositories/subject_repository.dart';
@@ -367,33 +367,33 @@ class SubjectDetailScreen extends ConsumerWidget {
 // ── Risk Badge ────────────────────────────────────────────────────────────────
 
 class _RiskBadge extends StatelessWidget {
-  final AttendanceStatus status;
+  final calc.AttendanceStatus status;
   const _RiskBadge({required this.status});
 
   @override
   Widget build(BuildContext context) {
     final (bg, fg, label) = switch (status) {
-      AttendanceStatus.excellent => (
+      calc.AttendanceStatus.excellent => (
           AppColors.success.withAlpha(40),
           Colors.white,
           '✅ Excellent',
         ),
-      AttendanceStatus.good => (
+      calc.AttendanceStatus.good => (
           AppColors.success.withAlpha(30),
           Colors.white,
           '👍 Good',
         ),
-      AttendanceStatus.safe => (
+      calc.AttendanceStatus.safe => (
           Colors.white.withAlpha(30),
           Colors.white,
           '✓ Safe',
         ),
-      AttendanceStatus.risky => (
+      calc.AttendanceStatus.risky => (
           AppColors.warning.withAlpha(50),
           Colors.white,
           '⚠️ Watch',
         ),
-      AttendanceStatus.critical => (
+      calc.AttendanceStatus.critical => (
           AppColors.error.withAlpha(60),
           Colors.white,
           '🚨 Critical',
@@ -627,7 +627,7 @@ class _TrendCard extends StatelessWidget {
 // ── Subject Log Tile ──────────────────────────────────────────────────────────
 
 class _SubjectLogTile extends StatelessWidget {
-  final log_model.AttendanceLogModel log;
+  final AttendanceLogModel log;
   final bool isDark;
 
   const _SubjectLogTile({required this.log, required this.isDark});
@@ -685,25 +685,25 @@ class _SubjectLogTile extends StatelessWidget {
     );
   }
 
-  Color _statusColor(log_model.AttendanceStatus s) => switch (s) {
-        log_model.AttendanceStatus.present => AppColors.success,
-        log_model.AttendanceStatus.absent => AppColors.error,
-        log_model.AttendanceStatus.late => AppColors.warning,
-        log_model.AttendanceStatus.cancelled => AppColors.outline,
+  Color _statusColor(AttendanceStatus s) => switch (s) {
+        AttendanceStatus.present => AppColors.success,
+        AttendanceStatus.absent => AppColors.error,
+        AttendanceStatus.late => AppColors.warning,
+        AttendanceStatus.cancelled => AppColors.outline,
       };
 
-  IconData _statusIcon(log_model.AttendanceStatus s) => switch (s) {
-        log_model.AttendanceStatus.present => Icons.check_circle_rounded,
-        log_model.AttendanceStatus.absent => Icons.cancel_rounded,
-        log_model.AttendanceStatus.late => Icons.access_time_filled,
-        log_model.AttendanceStatus.cancelled => Icons.event_busy_rounded,
+  IconData _statusIcon(AttendanceStatus s) => switch (s) {
+        AttendanceStatus.present => Icons.check_circle_rounded,
+        AttendanceStatus.absent => Icons.cancel_rounded,
+        AttendanceStatus.late => Icons.access_time_filled,
+        AttendanceStatus.cancelled => Icons.event_busy_rounded,
       };
 
-  String _statusLabel(log_model.AttendanceStatus s) => switch (s) {
-        log_model.AttendanceStatus.present => 'Present',
-        log_model.AttendanceStatus.absent => 'Absent',
-        log_model.AttendanceStatus.late => 'Late',
-        log_model.AttendanceStatus.cancelled => 'Cancelled',
+  String _statusLabel(AttendanceStatus s) => switch (s) {
+        AttendanceStatus.present => 'Present',
+        AttendanceStatus.absent => 'Absent',
+        AttendanceStatus.late => 'Late',
+        AttendanceStatus.cancelled => 'Cancelled',
       };
 }
 

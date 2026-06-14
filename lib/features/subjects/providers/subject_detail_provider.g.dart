@@ -294,7 +294,7 @@ class _SubjectLogsStreamProviderElement
   String get subjectId => (origin as SubjectLogsStreamProvider).subjectId;
 }
 
-String _$subjectDetailHash() => r'3f57744736c5a07c8e4ba8e79e566871e242459f';
+String _$subjectDetailHash() => r'74023efeffc78208af36346bac524d7354c00212';
 
 /// See also [subjectDetail].
 @ProviderFor(subjectDetail)
