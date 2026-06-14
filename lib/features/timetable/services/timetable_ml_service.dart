@@ -1,7 +1,7 @@
 /// TimetableMlService
 ///
 /// Pipeline:
-///   1. Google ML Kit Text Recognition  → on-device OCR
+///   1. Google ML Kit Text Recognition  → on-device OCR (image or PDF page)
 ///   2. Groq API (LLaMA 3.3 70B)        → structured JSON parsing
 library;
 
@@ -12,15 +12,18 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:pdfx/pdfx.dart';
 
 import '../../../data/models/timetable_entry_model.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Groq config
+//  Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 const _kGroqBaseUrl = 'https://api.groq.com/openai/v1/chat/completions';
 const _kGroqModel = 'llama-3.3-70b-versatile';
+const _kMaxPdfPages = 10;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  System prompt — tuned for Indian engineering college timetables
@@ -71,7 +74,7 @@ class TimetableMlService {
   TimetableMlService._();
   static final TimetableMlService instance = TimetableMlService._();
 
-  // ── Step 1: ML Kit OCR ────────────────────────────────────────────────────
+  // ── Step 1a: ML Kit OCR (image) ───────────────────────────────────────────
 
   Future<String> extractTextFromImage(File imageFile) async {
     final inputImage = InputImage.fromFile(imageFile);
@@ -91,7 +94,6 @@ class TimetableMlService {
       debugPrint('[ML Kit] Blocks: ${result.blocks.length}');
 
       // ── Build spatially-sorted structured text ──────────────────────────
-      // Collect all lines with their bounding boxes
       final allLines = <_MlLine>[];
       for (final block in result.blocks) {
         for (final line in block.lines) {
@@ -104,19 +106,15 @@ class TimetableMlService {
         }
       }
 
-      // Sort by actual pixel position (NOT compareTo — that returns -1/0/1)
       allLines.sort((a, b) {
         final yPixelDiff = a.top - b.top;
-        // Same row = within 18px vertically
         if (yPixelDiff.abs() > 18) {
           return yPixelDiff < 0 ? -1 : 1;
         }
-        // Same row: sort left to right
         final xPixelDiff = a.left - b.left;
         return xPixelDiff < 0 ? -1 : (xPixelDiff > 0 ? 1 : 0);
       });
 
-      // Group into table rows (lines within 18px of each other vertically)
       final tableRows = <List<_MlLine>>[];
       List<_MlLine> currentRow = [];
       double? rowAnchorTop;
@@ -133,7 +131,6 @@ class TimetableMlService {
       }
       if (currentRow.isNotEmpty) tableRows.add(currentRow);
 
-      // Build structured text: tab-separated columns, one line per row
       final structuredLines = tableRows
           .map((row) => row.map((l) => l.text.trim()).join('\t'))
           .where((line) => line.isNotEmpty)
@@ -142,15 +139,108 @@ class TimetableMlService {
       final structuredText = structuredLines.join('\n');
 
       debugPrint('[ML Kit] Structured rows: ${tableRows.length}');
-      debugPrint('[ML Kit] Preview:\n${structuredText.substring(0, structuredText.length.clamp(0, 500))}');
 
-      // Return both ML Kit's native text AND our structured version
       return '=== ML KIT RAW TEXT ===\n'
           '${result.text}\n\n'
           '=== SPATIALLY RECONSTRUCTED TABLE (tab=column, newline=row) ===\n'
           '$structuredText';
     } finally {
       recognizer.close();
+    }
+  }
+
+  // ── Step 1b: PDF → images → OCR ──────────────────────────────────────────
+
+  /// Extracts text from all pages of a PDF by rendering each page to an image
+  /// and running ML Kit OCR. Pages are processed sequentially.
+  ///
+  /// [onPageProgress] is called before each page (1-indexed, totalPages).
+  Future<String> extractTextFromPdf(
+    File pdfFile, {
+    void Function(int current, int total)? onPageProgress,
+  }) async {
+    final tempDir = await getTemporaryDirectory();
+    final tempFiles = <File>[];
+
+    PdfDocument? document;
+    try {
+      document = await PdfDocument.openFile(pdfFile.path);
+      final pageCount = document.pagesCount;
+      debugPrint('[PDF] Pages: $pageCount');
+
+      if (pageCount == 0) {
+        throw const TimetableOcrException(
+            'The PDF appears to be empty (0 pages).');
+      }
+
+      if (pageCount > _kMaxPdfPages) {
+        throw TimetableOcrException(
+            'PDF has $pageCount pages. Maximum allowed is $_kMaxPdfPages.\n'
+            'Please upload a PDF with the timetable on fewer pages.');
+      }
+
+      final allPageTexts = <String>[];
+
+      for (int pageIndex = 1; pageIndex <= pageCount; pageIndex++) {
+        onPageProgress?.call(pageIndex, pageCount);
+        debugPrint('[PDF] Processing page $pageIndex/$pageCount');
+
+        final page = await document.getPage(pageIndex);
+        try {
+          // Render at 150 DPI equivalent (scale = 150/72 ≈ 2.08)
+          final pageImage = await page.render(
+            width: page.width * 2.1,
+            height: page.height * 2.1,
+            format: PdfPageImageFormat.jpeg,
+            backgroundColor: '#FFFFFF',
+          );
+
+          if (pageImage == null || pageImage.bytes.isEmpty) {
+            debugPrint('[PDF] Page $pageIndex rendered empty — skipping');
+            continue;
+          }
+
+          // Write rendered image to a temp file
+          final tempFile =
+              File('${tempDir.path}/timetable_page_$pageIndex.jpg');
+          await tempFile.writeAsBytes(pageImage.bytes);
+          tempFiles.add(tempFile);
+
+          // Run ML Kit OCR on the temp image
+          try {
+            final text = await extractTextFromImage(tempFile);
+            if (text.trim().isNotEmpty) {
+              allPageTexts.add('=== PDF PAGE $pageIndex ===\n$text');
+            }
+          } on TimetableOcrException catch (e) {
+            // Low-confidence page — log and continue
+            debugPrint('[PDF] Page $pageIndex OCR issue: ${e.message}');
+          }
+        } finally {
+          await page.close();
+        }
+      }
+
+      if (allPageTexts.isEmpty) {
+        throw const TimetableOcrException(
+          'No readable text found in any PDF page.\n'
+          '• Try uploading the timetable as an image (PNG/JPG) instead\n'
+          '• Ensure the PDF is not encrypted or password-protected',
+        );
+      }
+
+      final merged = allPageTexts.join('\n\n');
+      debugPrint('[PDF] Merged text from ${allPageTexts.length} pages, '
+          '${merged.length} chars');
+      return merged;
+    } finally {
+      await document?.close();
+      // Clean up temp files
+      for (final f in tempFiles) {
+        try {
+          await f.delete();
+        } catch (_) {}
+      }
     }
   }
 
@@ -174,7 +264,8 @@ class TimetableMlService {
         {'role': 'system', 'content': _kSystemPrompt},
         {
           'role': 'user',
-          'content': 'Parse the following timetable OCR text into the JSON schema. '
+          'content':
+              'Parse the following timetable OCR text into the JSON schema. '
               'The text contains the raw ML Kit output and a spatially-reconstructed table.\n\n'
               '$rawText\n\n'
               'Return ONLY the JSON object.',
@@ -186,7 +277,7 @@ class TimetableMlService {
     });
 
     try {
-      debugPrint('[Groq] Sending request to Groq API…');
+      debugPrint('[Groq] Sending request…');
       final response = await http
           .post(
             Uri.parse(_kGroqBaseUrl),
@@ -205,14 +296,13 @@ class TimetableMlService {
         final content =
             data['choices'][0]['message']['content'] as String? ?? '';
         debugPrint('[Groq] Response length: ${content.length}');
-        debugPrint('[Groq] Preview: ${content.substring(0, content.length.clamp(0, 300))}');
         return _parseGroqJson(content);
       } else if (response.statusCode == 401) {
         throw const TimetableOcrException(
             'Invalid Groq API key. Check GROQ_API_KEY in .env file.');
       } else if (response.statusCode == 429) {
         throw const TimetableOcrException(
-            'Groq rate limit. Please wait a moment and try again.');
+            'Groq rate limit reached. Please wait a moment and try again.');
       } else {
         Map<String, dynamic>? err;
         try {
@@ -227,17 +317,20 @@ class TimetableMlService {
     } on SocketException {
       throw const TimetableOcrException(
           'No internet connection. Check your network and try again.');
+    } on http.ClientException {
+      throw const TimetableOcrException(
+          'Network request failed. Please check your connection.');
     } catch (e) {
       throw TimetableOcrException('Groq request failed: $e');
     }
   }
 
-  // ── Full pipeline ─────────────────────────────────────────────────────────
+  // ── Full image pipeline (convenience) ────────────────────────────────────
 
-  Future<Map<String, List<TimetableEntry>>> processImage(File imageFile) async {
+  Future<Map<String, List<TimetableEntry>>> processImage(
+      File imageFile) async {
     final rawText = await extractTextFromImage(imageFile);
-    final schedule = await parseTextWithGroq(rawText);
-    return schedule;
+    return parseTextWithGroq(rawText);
   }
 
   // ── JSON parsing ──────────────────────────────────────────────────────────
@@ -281,11 +374,13 @@ class TimetableMlService {
           entries.add(TimetableEntry(
             subject: (e['subject'] as String? ?? 'Unknown').trim(),
             day: day,
-            startTime: _normaliseTime(e['startTime'] as String? ?? '00:00'),
+            startTime:
+                _normaliseTime(e['startTime'] as String? ?? '00:00'),
             endTime: _normaliseTime(e['endTime'] as String? ?? '00:00'),
             faculty: e['faculty'] as String?,
             room: e['room'] as String?,
-            confidence: (e['confidence'] as num?)?.toDouble() ?? 0.8,
+            confidence:
+                (e['confidence'] as num?)?.toDouble() ?? 0.8,
           ));
         } catch (ex) {
           debugPrint('[Parse] Skipping malformed entry $e: $ex');
@@ -301,11 +396,12 @@ class TimetableMlService {
 
     if (totalEntries == 0) {
       throw const TimetableOcrException(
-        'Groq could not find any classes in the image.\n\n'
+        'Could not find any classes in the timetable.\n\n'
         'Tips:\n'
         '• Make sure the full timetable is visible\n'
-        '• Try a higher resolution / better lit photo\n'
-        '• Ensure the image is not rotated more than 45°',
+        '• Try a higher resolution or better lit photo\n'
+        '• Ensure the image is not rotated more than 45°\n'
+        '• For PDFs, ensure the text is not encrypted',
       );
     }
 

@@ -44,8 +44,13 @@ class TimetableScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
+            icon: Icon(Icons.grid_view_rounded, color: onSurfaceVariant),
+            tooltip: 'Manage Timetable',
+            onPressed: () => context.push('/timetable/manage'),
+          ),
+          IconButton(
             icon: Icon(Icons.document_scanner_outlined, color: onSurfaceVariant),
-            tooltip: 'Import Timetable',
+            tooltip: 'Import via OCR',
             onPressed: () => context.push('/timetable/upload'),
           ),
           IconButton(
@@ -53,6 +58,13 @@ class TimetableScreen extends ConsumerWidget {
             onPressed: () {},
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => context.push('/timetable/manual-entry'),
+        backgroundColor: primary,
+        foregroundColor: Colors.white,
+        tooltip: 'Add Class',
+        child: const Icon(Icons.add),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(

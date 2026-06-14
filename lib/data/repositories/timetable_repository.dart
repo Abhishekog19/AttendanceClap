@@ -31,28 +31,120 @@ class TimetableRepository {
 
   String get _uid => _auth.currentUser!.uid;
 
-  // ── Save raw timetable entries ────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  CollectionReference<Map<String, dynamic>> get _entriesCol =>
+      _firestore.collection('users').doc(_uid).collection('timetable_entries');
+
+  CollectionReference<Map<String, dynamic>> get _sessionsCol =>
+      _firestore.collection('users').doc(_uid).collection('class_sessions');
+
+  CollectionReference<Map<String, dynamic>> get _semestersCol =>
+      _firestore.collection('users').doc(_uid).collection('semesters');
+
+  // ── Watch all saved timetable entries (real-time) ─────────────────────────
+
+  Stream<List<TimetableEntry>> watchTimetableEntries() {
+    return _entriesCol
+        .orderBy('day')
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => TimetableEntry.fromFirestore(d.data(), d.id))
+            .toList());
+  }
+
+  // ── Save raw timetable entries (bulk — used by OCR pipeline) ─────────────
 
   Future<void> saveTimetable(List<TimetableEntry> entries) async {
     final batch = _firestore.batch();
-    final col = _firestore
-        .collection('users')
-        .doc(_uid)
-        .collection('timetable_entries');
 
     // Clear existing
-    final existing = await col.get();
+    final existing = await _entriesCol.get();
     for (final doc in existing.docs) {
       batch.delete(doc.reference);
     }
 
     // Write new
     for (final entry in entries) {
-      final ref = col.doc(_uuid.v4());
+      final ref = _entriesCol.doc(_uuid.v4());
       batch.set(ref, entry.toMap());
     }
 
     await batch.commit();
+  }
+
+  // ── Single entry CRUD (manual timetable management) ───────────────────────
+
+  /// Adds a single entry. Returns the new Firestore document ID.
+  Future<String> addTimetableEntry(TimetableEntry entry) async {
+    final ref = _entriesCol.doc(_uuid.v4());
+    await ref.set(entry.toMap());
+    return ref.id;
+  }
+
+  /// Replaces an existing entry in-place.
+  Future<void> updateTimetableEntry(String id, TimetableEntry entry) async {
+    await _entriesCol.doc(id).set(entry.toMap());
+  }
+
+  /// Deletes a single entry and optionally cascades to future sessions.
+  Future<void> deleteTimetableEntry(
+    String id, {
+    String? subjectName,
+    String? day,
+    String? startTime,
+    bool deleteFutureSessions = false,
+  }) async {
+    // Delete the entry doc
+    await _entriesCol.doc(id).delete();
+
+    // Cascade to future notMarked sessions
+    if (deleteFutureSessions &&
+        subjectName != null &&
+        day != null &&
+        startTime != null) {
+      await _deleteFutureSessionsForEntry(
+          subjectName: subjectName, day: day, startTime: startTime);
+    }
+  }
+
+  /// Returns the count of upcoming notMarked sessions that match an entry,
+  /// so the UI can warn the user before deletion.
+  Future<int> countFutureSessionsForEntry({
+    required String subjectName,
+    required String day,
+    required String startTime,
+  }) async {
+    final now = Timestamp.fromDate(DateTime.now());
+    final weekday = _weekdayNumber(day);
+
+    final snap = await _sessionsCol
+        .where('subjectName', isEqualTo: subjectName)
+        .where('startTime', isEqualTo: startTime)
+        .where('status', isEqualTo: 'notMarked')
+        .where('date', isGreaterThanOrEqualTo: now)
+        .get();
+
+    return snap.docs.where((d) {
+      final date = (d.data()['date'] as Timestamp).toDate();
+      return date.weekday == weekday;
+    }).length;
+  }
+
+  // ── Active Semester ───────────────────────────────────────────────────────
+
+  /// Fetches the most recently created semester, or null if none exists.
+  Future<Semester?> getActiveSemester() async {
+    final snap = await _semestersCol
+        .orderBy('createdAt', descending: true)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    try {
+      return Semester.fromMap(snap.docs.first.data());
+    } catch (_) {
+      return null;
+    }
   }
 
   // ── Auto-create subjects from timetable ───────────────────────────────────
@@ -63,7 +155,8 @@ class TimetableRepository {
     final subjectNames = entries.map((e) => e.subject).toSet();
     final subjectIdMap = <String, String>{}; // name → id
 
-    final col = _firestore.collection('users').doc(_uid).collection('subjects');
+    final col =
+        _firestore.collection('users').doc(_uid).collection('subjects');
 
     // Fetch existing subjects to avoid duplication
     final existing = await col.get();
@@ -86,7 +179,8 @@ class TimetableRepository {
           'id': id,
           'uid': _uid,
           'name': name,
-          'faculty': entries.firstWhere((e) => e.subject == name).faculty,
+          'faculty':
+              entries.firstWhere((e) => e.subject == name).faculty,
           'targetAttendance': 75.0,
           'attendedClasses': 0,
           'totalClasses': 0,
@@ -102,12 +196,7 @@ class TimetableRepository {
   // ── Save semester ─────────────────────────────────────────────────────────
 
   Future<void> saveSemester(Semester semester) async {
-    await _firestore
-        .collection('users')
-        .doc(_uid)
-        .collection('semesters')
-        .doc(semester.id)
-        .set(semester.toMap());
+    await _semestersCol.doc(semester.id).set(semester.toMap());
   }
 
   // ── Generate & save class sessions ───────────────────────────────────────
@@ -154,19 +243,66 @@ class TimetableRepository {
 
     // Batch-write in chunks of 500 (Firestore limit)
     const chunkSize = 500;
-    final col = _firestore
-        .collection('users')
-        .doc(_uid)
-        .collection('class_sessions');
 
     for (int i = 0; i < sessions.length; i += chunkSize) {
       final chunk = sessions.skip(i).take(chunkSize).toList();
       final batch = _firestore.batch();
       for (final session in chunk) {
-        batch.set(col.doc(session.id), session.toMap());
+        batch.set(_sessionsCol.doc(session.id), session.toMap());
       }
       await batch.commit();
       onProgress?.call((i + chunk.length) / sessions.length);
+    }
+
+    return sessions.length;
+  }
+
+  /// Generates sessions for a single entry from [fromDate] to semester end.
+  /// Used when manually adding a class to an active semester.
+  Future<int> addSessionsForEntry({
+    required TimetableEntry entry,
+    required String subjectId,
+    required Semester semester,
+    DateTime? fromDate,
+  }) async {
+    final start = fromDate ?? semester.startDate;
+    final limitedSemester = Semester(
+      id: semester.id,
+      uid: semester.uid,
+      startDate: start.isAfter(semester.startDate) ? start : semester.startDate,
+      endDate: semester.endDate,
+      holidays: semester.holidays,
+      createdAt: semester.createdAt,
+    );
+
+    final weekday = _weekdayNumber(entry.day);
+    final dates = limitedSemester.getDatesForWeekday(weekday);
+
+    if (dates.isEmpty) return 0;
+
+    final sessions = dates
+        .map((date) => ClassSession(
+              id: _uuid.v4(),
+              subjectId: subjectId,
+              subjectName: entry.subject,
+              date: date,
+              startTime: entry.startTime,
+              endTime: entry.endTime,
+              faculty: entry.faculty,
+              room: entry.room,
+              status: AttendanceStatus.notMarked,
+              uid: _uid,
+            ))
+        .toList();
+
+    const chunkSize = 500;
+    for (int i = 0; i < sessions.length; i += chunkSize) {
+      final chunk = sessions.skip(i).take(chunkSize).toList();
+      final batch = _firestore.batch();
+      for (final session in chunk) {
+        batch.set(_sessionsCol.doc(session.id), session.toMap());
+      }
+      await batch.commit();
     }
 
     return sessions.length;
@@ -179,10 +315,7 @@ class TimetableRepository {
     final startOfDay = DateTime(now.year, now.month, now.day);
     final endOfDay = startOfDay.add(const Duration(days: 1));
 
-    return _firestore
-        .collection('users')
-        .doc(_uid)
-        .collection('class_sessions')
+    return _sessionsCol
         .where('date',
             isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
         .where('date', isLessThan: Timestamp.fromDate(endOfDay))
@@ -198,11 +331,56 @@ class TimetableRepository {
     String sessionId,
     AttendanceStatus status,
   ) async {
-    await _firestore
-        .collection('users')
-        .doc(_uid)
-        .collection('class_sessions')
+    await _sessionsCol
         .doc(sessionId)
         .update({'status': status.name});
+  }
+
+  // ── Private helpers ───────────────────────────────────────────────────────
+
+  Future<void> _deleteFutureSessionsForEntry({
+    required String subjectName,
+    required String day,
+    required String startTime,
+  }) async {
+    final now = Timestamp.fromDate(DateTime.now());
+    final weekday = _weekdayNumber(day);
+
+    final snap = await _sessionsCol
+        .where('subjectName', isEqualTo: subjectName)
+        .where('startTime', isEqualTo: startTime)
+        .where('status', isEqualTo: 'notMarked')
+        .where('date', isGreaterThanOrEqualTo: now)
+        .get();
+
+    final toDelete = snap.docs.where((d) {
+      final date = (d.data()['date'] as Timestamp).toDate();
+      return date.weekday == weekday;
+    }).toList();
+
+    if (toDelete.isEmpty) return;
+
+    const chunkSize = 500;
+    for (int i = 0; i < toDelete.length; i += chunkSize) {
+      final chunk = toDelete.skip(i).take(chunkSize).toList();
+      final batch = _firestore.batch();
+      for (final d in chunk) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    }
+  }
+
+  static int _weekdayNumber(String day) {
+    const map = {
+      'Monday': 1,
+      'Tuesday': 2,
+      'Wednesday': 3,
+      'Thursday': 4,
+      'Friday': 5,
+      'Saturday': 6,
+      'Sunday': 7,
+    };
+    return map[day] ?? 1;
   }
 }

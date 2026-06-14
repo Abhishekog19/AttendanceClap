@@ -14,6 +14,8 @@ import '../../features/timetable/screens/timetable_upload_screen.dart';
 import '../../features/timetable/screens/timetable_review_screen.dart';
 import '../../features/timetable/screens/semester_setup_screen.dart';
 import '../../features/timetable/screens/schedule_preview_screen.dart';
+import '../../features/timetable/screens/manage_timetable_screen.dart';
+import '../../features/timetable/screens/manual_entry_screen.dart';
 import '../../features/predictor/screens/predictor_screen.dart';
 import '../../features/analytics/screens/analytics_screen.dart';
 import '../../features/premium/screens/premium_screen.dart';
@@ -21,6 +23,7 @@ import '../../features/profile/screens/profile_screen.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../shared/widgets/main_shell.dart';
 import '../../data/models/subject_model.dart';
+import '../../data/models/timetable_entry_model.dart';
 
 part 'app_router.g.dart';
 
@@ -134,6 +137,20 @@ GoRouter appRouter(Ref ref) {
         path: '/timetable/schedule-preview',
         name: 'schedulePreview',
         builder: (context, state) => const SchedulePreviewScreen(),
+      ),
+      // ─── Timetable Manual Management Routes ───────────────────────────────────
+      GoRoute(
+        path: '/timetable/manage',
+        name: 'manageTimetable',
+        builder: (context, state) => const ManageTimetableScreen(),
+      ),
+      GoRoute(
+        path: '/timetable/manual-entry',
+        name: 'manualEntry',
+        builder: (context, state) {
+          final existing = state.extra as TimetableEntry?;
+          return ManualEntryScreen(existing: existing);
+        },
       ),
     ],
     errorBuilder: (context, state) => Scaffold(
