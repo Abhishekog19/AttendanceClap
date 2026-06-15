@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+// ignore: unused_import  // TimeOfDay is used transitively by prefs fields
+import 'package:flutter/material.dart' show TimeOfDay;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 

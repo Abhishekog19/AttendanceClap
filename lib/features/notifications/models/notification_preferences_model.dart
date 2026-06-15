@@ -147,52 +147,52 @@ class NotificationPreferences {
       };
 
   factory NotificationPreferences.fromFirestore(Map<String, dynamic> m) {
-    TimeOfDay? _tod(String hKey, String mKey) {
+    TimeOfDay? tod(String hKey, String mKey) {
       final h = m[hKey] as int?;
       final min = m[mKey] as int?;
       if (h == null || min == null) return null;
       return TimeOfDay(hour: h, minute: min);
     }
 
-    int _i(String k, int def) => (m[k] as num?)?.toInt() ?? def;
-    bool _b(String k, bool def) => m[k] as bool? ?? def;
+    int i(String k, int def) => (m[k] as num?)?.toInt() ?? def;
+    bool b(String k, bool def) => m[k] as bool? ?? def;
 
     return NotificationPreferences(
-      notificationsEnabled: _b('notificationsEnabled', true),
-      soundEnabled: _b('soundEnabled', true),
-      vibrationEnabled: _b('vibrationEnabled', true),
-      badgeCount: _b('badgeCount', true),
-      quietHoursStart: _tod('quietHoursStartHour', 'quietHoursStartMinute'),
-      quietHoursEnd: _tod('quietHoursEndHour', 'quietHoursEndMinute'),
-      classRemindersEnabled: _b('classRemindersEnabled', true),
-      reminderMinutes: _i('reminderMinutes', 15),
-      onlyFirstClassReminder: _b('onlyFirstClassReminder', false),
-      gapClassRemindersEnabled: _b('gapClassRemindersEnabled', true),
-      gapMinutes: _i('gapMinutes', 30),
-      attendanceRemindersEnabled: _b('attendanceRemindersEnabled', true),
-      attendanceDelayMinutes: _i('attendanceDelayMinutes', 5),
-      absentRestOfDayEnabled: _b('absentRestOfDayEnabled', true),
-      autoDismissMinutes: _i('autoDismissMinutes', 0),
-      lowAttendanceAlertsEnabled: _b('lowAttendanceAlertsEnabled', true),
-      recoverySuggestionsEnabled: _b('recoverySuggestionsEnabled', true),
-      safeBunkPlannerEnabled: _b('safeBunkPlannerEnabled', true),
+      notificationsEnabled: b('notificationsEnabled', true),
+      soundEnabled: b('soundEnabled', true),
+      vibrationEnabled: b('vibrationEnabled', true),
+      badgeCount: b('badgeCount', true),
+      quietHoursStart: tod('quietHoursStartHour', 'quietHoursStartMinute'),
+      quietHoursEnd: tod('quietHoursEndHour', 'quietHoursEndMinute'),
+      classRemindersEnabled: b('classRemindersEnabled', true),
+      reminderMinutes: i('reminderMinutes', 15),
+      onlyFirstClassReminder: b('onlyFirstClassReminder', false),
+      gapClassRemindersEnabled: b('gapClassRemindersEnabled', true),
+      gapMinutes: i('gapMinutes', 30),
+      attendanceRemindersEnabled: b('attendanceRemindersEnabled', true),
+      attendanceDelayMinutes: i('attendanceDelayMinutes', 5),
+      absentRestOfDayEnabled: b('absentRestOfDayEnabled', true),
+      autoDismissMinutes: i('autoDismissMinutes', 0),
+      lowAttendanceAlertsEnabled: b('lowAttendanceAlertsEnabled', true),
+      recoverySuggestionsEnabled: b('recoverySuggestionsEnabled', true),
+      safeBunkPlannerEnabled: b('safeBunkPlannerEnabled', true),
       plannerTime: TimeOfDay(
-        hour: _i('plannerTimeHour', 22),
-        minute: _i('plannerTimeMinute', 0),
+        hour: i('plannerTimeHour', 22),
+        minute: i('plannerTimeMinute', 0),
       ),
-      includeSafeBunks: _b('includeSafeBunks', true),
+      includeSafeBunks: b('includeSafeBunks', true),
       plannerIncludeRecoverySuggestions:
-          _b('plannerIncludeRecoverySuggestions', true),
-      includeRiskSubjects: _b('includeRiskSubjects', true),
-      dailySummaryEnabled: _b('dailySummaryEnabled', false),
+          b('plannerIncludeRecoverySuggestions', true),
+      includeRiskSubjects: b('includeRiskSubjects', true),
+      dailySummaryEnabled: b('dailySummaryEnabled', false),
       summaryTime: TimeOfDay(
-        hour: _i('summaryTimeHour', 21),
-        minute: _i('summaryTimeMinute', 0),
+        hour: i('summaryTimeHour', 21),
+        minute: i('summaryTimeMinute', 0),
       ),
-      includeClassesAttended: _b('includeClassesAttended', true),
-      includeClassesMissed: _b('includeClassesMissed', true),
-      includeSubjectBreakdown: _b('includeSubjectBreakdown', true),
-      includeOverallAttendance: _b('includeOverallAttendance', true),
+      includeClassesAttended: b('includeClassesAttended', true),
+      includeClassesMissed: b('includeClassesMissed', true),
+      includeSubjectBreakdown: b('includeSubjectBreakdown', true),
+      includeOverallAttendance: b('includeOverallAttendance', true),
     );
   }
 

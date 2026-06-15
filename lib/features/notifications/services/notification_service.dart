@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:flutter_timezone/timezone_info.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -49,8 +50,9 @@ class NotificationService {
     // Timezone setup
     tz.initializeTimeZones();
     try {
-      final locationName = await FlutterTimezone.getLocalTimezone();
-      tz.setLocalLocation(tz.getLocation(locationName));
+      // flutter_timezone v5 returns TimezoneInfo; .identifier is the IANA string
+      final TimezoneInfo tzInfo = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(tzInfo.identifier));
     } catch (_) {
       tz.setLocalLocation(tz.getLocation('Asia/Kolkata'));
     }
