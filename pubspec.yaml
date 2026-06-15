@@ -67,6 +67,9 @@ dependencies:
   # Env config (for Gemini API key)
   flutter_dotenv: ^5.2.1
 
+  #Razorpay
+  razorpay_flutter: 1.4.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

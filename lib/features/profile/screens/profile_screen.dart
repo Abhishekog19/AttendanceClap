@@ -6,6 +6,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../data/repositories/auth_repository.dart';
+import '../../../features/premium/providers/premium_provider.dart';
 import '../providers/profile_provider.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -23,6 +24,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider);
     final profileAsync = ref.watch(userProfileProvider);
+    final premiumState = ref.watch(premiumNotifierProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
     final bg = isDark ? AppColors.darkSurface : AppColors.background;
@@ -42,11 +44,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         backgroundColor: bg,
         title: Text('Profile', style: AppTextStyles.headlineMd.copyWith(color: primary)),
         actions: [
-          IconButton(
-            icon: Icon(Icons.workspace_premium_outlined, color: primary),
-            tooltip: 'Go Premium',
-            onPressed: () => context.push('/premium'),
-          ),
+          if (!premiumState.isPremium)
+            IconButton(
+              icon: Icon(Icons.workspace_premium_outlined, color: primary),
+              tooltip: 'Go Premium',
+              onPressed: () => context.push('/premium'),
+            ),
         ],
       ),
       body: ListView(
@@ -193,11 +196,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             child: Column(
               children: [
-                _SettingsTile(
-                  icon: Icons.workspace_premium_outlined,
-                  title: 'Upgrade to Premium',
-                  subtitle: 'Unlock AI predictions & more',
-                  iconColor: primary,
+                _PremiumSettingsTile(
+                  premiumState: premiumState,
+                  isDark: isDark,
+                  primary: primary,
                   onSurface: onSurface,
                   onSurfaceVariant: onSurfaceVariant,
                   onTap: () => context.push('/premium'),
@@ -231,7 +233,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             height: 52,
             child: OutlinedButton.icon(
               onPressed: () => _signOut(context, ref),
-              icon: Icon(Icons.logout, color: AppColors.error),
+              icon: const Icon(Icons.logout, color: AppColors.error),
               label: Text(
                 'Sign Out',
                 style: AppTextStyles.bodyLg.copyWith(
@@ -365,4 +367,103 @@ class _SettingsTile extends StatelessWidget {
         trailing: Icon(Icons.arrow_forward_ios, size: 14, color: onSurfaceVariant),
         onTap: onTap,
       );
+}
+
+// ─── Premium Settings Tile (3-state) ──────────────────────────────────────────
+
+class _PremiumSettingsTile extends StatelessWidget {
+  final PremiumState premiumState;
+  final bool isDark;
+  final Color primary;
+  final Color onSurface;
+  final Color onSurfaceVariant;
+  final VoidCallback onTap;
+
+  const _PremiumSettingsTile({
+    required this.premiumState,
+    required this.isDark,
+    required this.primary,
+    required this.onSurface,
+    required this.onSurfaceVariant,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // ── Annual subscriber — show active status, no action needed ──────────
+    if (premiumState.isPremium && premiumState.planType == 'annual') {
+      return ListTile(
+        leading: const Icon(Icons.verified_rounded, color: AppColors.success),
+        title: Text(
+          'Premium Active',
+          style: AppTextStyles.bodyLg.copyWith(
+              color: AppColors.success, fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          'Annual Plan — Best value',
+          style: AppTextStyles.bodySm.copyWith(color: AppColors.success.withAlpha(180)),
+        ),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: AppColors.successContainer,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            'ACTIVE',
+            style: AppTextStyles.labelCaps.copyWith(
+                color: AppColors.success, fontSize: 10),
+          ),
+        ),
+        onTap: onTap, // still navigable to view plan details
+      );
+    }
+
+    // ── Monthly subscriber — prompt annual upgrade ─────────────────────────
+    if (premiumState.isPremium && premiumState.planType == 'monthly') {
+      return ListTile(
+        leading: const Icon(Icons.workspace_premium_rounded,
+            color: AppColors.tertiary),
+        title: Text(
+          'Upgrade to Annual',
+          style: AppTextStyles.bodyLg.copyWith(
+              color: AppColors.tertiary, fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          'Save ₹40/year vs monthly · Best value',
+          style: AppTextStyles.bodySm.copyWith(
+              color: AppColors.tertiary.withAlpha(180)),
+        ),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: AppColors.tertiary.withAlpha(30),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: AppColors.tertiary.withAlpha(80)),
+          ),
+          child: Text(
+            'UPGRADE',
+            style: AppTextStyles.labelCaps.copyWith(
+                color: AppColors.tertiary, fontSize: 10),
+          ),
+        ),
+        onTap: onTap,
+      );
+    }
+
+    // ── Free user — standard upgrade CTA ──────────────────────────────────
+    return ListTile(
+      leading: Icon(Icons.workspace_premium_outlined, color: primary),
+      title: Text(
+        'Upgrade to Premium',
+        style: AppTextStyles.bodyLg.copyWith(color: onSurface),
+      ),
+      subtitle: Text(
+        'Unlock AI predictions & more',
+        style: AppTextStyles.bodySm.copyWith(color: onSurfaceVariant),
+      ),
+      trailing: Icon(Icons.arrow_forward_ios, size: 14, color: onSurfaceVariant),
+      onTap: onTap,
+    );
+  }
 }

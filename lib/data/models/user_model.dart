@@ -10,6 +10,11 @@ class UserModel extends Equatable {
   final String themeMode; // 'system', 'light', 'dark'
   final bool notificationsEnabled;
 
+  // ─── Premium ────────────────────────────────────────────────────────────────
+  final bool isPremium;
+  final String? planType; // 'monthly' | 'annual' | null
+  final DateTime? premiumExpiresAt;
+
   const UserModel({
     required this.uid,
     required this.name,
@@ -18,9 +23,18 @@ class UserModel extends Equatable {
     this.attendanceGoal = 75.0,
     this.themeMode = 'system',
     this.notificationsEnabled = true,
+    this.isPremium = false,
+    this.planType,
+    this.premiumExpiresAt,
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json, String uid) {
+    DateTime? expiresAt;
+    final rawExpiry = json['premiumExpiresAt'];
+    if (rawExpiry is Timestamp) {
+      expiresAt = rawExpiry.toDate();
+    }
+
     return UserModel(
       uid: uid,
       name: json['name'] as String? ?? '',
@@ -29,6 +43,9 @@ class UserModel extends Equatable {
       attendanceGoal: (json['attendanceGoal'] as num?)?.toDouble() ?? 75.0,
       themeMode: json['themeMode'] as String? ?? 'system',
       notificationsEnabled: json['notificationsEnabled'] as bool? ?? true,
+      isPremium: json['isPremium'] as bool? ?? false,
+      planType: json['planType'] as String?,
+      premiumExpiresAt: expiresAt,
     );
   }
 
@@ -40,6 +57,10 @@ class UserModel extends Equatable {
       'attendanceGoal': attendanceGoal,
       'themeMode': themeMode,
       'notificationsEnabled': notificationsEnabled,
+      'isPremium': isPremium,
+      'planType': planType,
+      'premiumExpiresAt':
+          premiumExpiresAt != null ? Timestamp.fromDate(premiumExpiresAt!) : null,
       'updatedAt': FieldValue.serverTimestamp(),
     };
   }
@@ -51,6 +72,9 @@ class UserModel extends Equatable {
     double? attendanceGoal,
     String? themeMode,
     bool? notificationsEnabled,
+    bool? isPremium,
+    String? planType,
+    DateTime? premiumExpiresAt,
   }) {
     return UserModel(
       uid: uid,
@@ -60,9 +84,15 @@ class UserModel extends Equatable {
       attendanceGoal: attendanceGoal ?? this.attendanceGoal,
       themeMode: themeMode ?? this.themeMode,
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
+      isPremium: isPremium ?? this.isPremium,
+      planType: planType ?? this.planType,
+      premiumExpiresAt: premiumExpiresAt ?? this.premiumExpiresAt,
     );
   }
 
   @override
-  List<Object?> get props => [uid, name, email, photoUrl, attendanceGoal, themeMode];
+  List<Object?> get props => [
+        uid, name, email, photoUrl, attendanceGoal, themeMode,
+        isPremium, planType, premiumExpiresAt,
+      ];
 }

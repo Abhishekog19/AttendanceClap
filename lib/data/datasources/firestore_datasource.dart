@@ -37,6 +37,24 @@ class FirestoreDatasource {
     await _userDoc(uid).update({...data, 'updatedAt': FieldValue.serverTimestamp()});
   }
 
+  /// Persists premium subscription status to Firestore after a successful payment.
+  Future<void> updatePremiumStatus({
+    required String uid,
+    required bool isPremium,
+    String? planType,
+    DateTime? expiresAt,
+    String? lastPaymentId,
+  }) async {
+    await _userDoc(uid).update({
+      'isPremium': isPremium,
+      'planType': planType,
+      'premiumExpiresAt':
+          expiresAt != null ? Timestamp.fromDate(expiresAt) : null,
+      'lastPaymentId': lastPaymentId,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   // ─── Subjects ────────────────────────────────────────────────────────────────
 
   CollectionReference<Map<String, dynamic>> _subjectsRef(String uid) =>
