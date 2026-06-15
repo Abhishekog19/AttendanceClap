@@ -5,6 +5,8 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'features/notifications/providers/notification_scheduler_provider.dart';
+import 'features/notifications/services/notification_service.dart';
 import 'features/profile/providers/profile_provider.dart';
 import 'firebase_options.dart';
 
@@ -21,6 +23,12 @@ void main() async {
   // Pass all uncaught errors to Crashlytics
   FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
 
+  // Initialise notification service (timezone + channels + background handler)
+  await NotificationService.instance.initialize();
+
+  // Request permissions on first launch (non-blocking — user sees OS dialog)
+  NotificationService.instance.requestPermissions();
+
   runApp(const ProviderScope(child: AttendanceAIApp()));
 }
 
@@ -30,8 +38,10 @@ class AttendanceAIApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
-    // themeModeProviderProvider is the generated name for the `themeModeProvider` function
     final themeMode = ref.watch(themeModeProviderProvider);
+
+    // Eagerly watch the scheduler — auto-reschedules whenever data changes
+    ref.watch(notificationSchedulerWatcherProvider);
 
     return MaterialApp.router(
       title: 'AttendanceAI',

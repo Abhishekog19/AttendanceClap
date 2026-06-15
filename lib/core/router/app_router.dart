@@ -23,6 +23,7 @@ import '../../features/profile/screens/profile_screen.dart';
 import '../../features/subjects/screens/subject_detail_screen.dart';
 import '../../features/attendance/screens/attendance_history_screen.dart';
 import '../../data/repositories/auth_repository.dart';
+import '../../features/notifications/screens/notification_settings_screen.dart';
 import '../../shared/widgets/main_shell.dart';
 import '../../data/models/subject_model.dart';
 import '../../data/models/timetable_entry_model.dart';
@@ -167,6 +168,11 @@ GoRouter appRouter(Ref ref) {
           final existing = state.extra as TimetableEntry?;
           return ManualEntryScreen(existing: existing);
         },
+      ),
+      GoRoute(
+        path: '/notifications/settings',
+        name: 'notificationSettings',
+        builder: (context, state) => const NotificationSettingsScreen(),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(

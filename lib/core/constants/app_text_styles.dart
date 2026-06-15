@@ -38,6 +38,12 @@ class AppTextStyles {
         height: 24 / 16,
       );
 
+  static TextStyle get bodyMd => GoogleFonts.inter(
+        fontSize: 15,
+        fontWeight: FontWeight.w400,
+        height: 22 / 15,
+      );
+
   static TextStyle get bodySm => GoogleFonts.inter(
         fontSize: 14,
         fontWeight: FontWeight.w400,

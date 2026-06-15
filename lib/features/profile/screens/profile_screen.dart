@@ -206,6 +206,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 ),
                 Divider(height: 1, indent: AppSpacing.md, color: borderColor),
                 _SettingsTile(
+                  icon: Icons.notifications_outlined,
+                  title: 'Notification Settings',
+                  subtitle: 'Reminders, alerts & bunk planner',
+                  iconColor: primary,
+                  onSurface: onSurface,
+                  onSurfaceVariant: onSurfaceVariant,
+                  onTap: () => context.push('/notifications/settings'),
+                ),
+                Divider(height: 1, indent: AppSpacing.md, color: borderColor),
+                _SettingsTile(
                   icon: Icons.help_outline,
                   title: 'Help & Support',
                   iconColor: onSurfaceVariant,
