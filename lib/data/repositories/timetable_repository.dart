@@ -4,7 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../datasources/firestore_datasource.dart';
+import '../models/attendance_log_model.dart';
 import '../models/class_session_model.dart';
+import '../models/daily_schedule_override_model.dart';
 import '../models/semester_model.dart';
 import '../models/timetable_entry_model.dart';
 
@@ -15,19 +18,23 @@ TimetableRepository timetableRepository(Ref ref) {
   return TimetableRepository(
     firestore: FirebaseFirestore.instance,
     auth: FirebaseAuth.instance,
+    datasource: ref.watch(firestoreDatasourceProvider),
   );
 }
 
 class TimetableRepository {
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
+  final FirestoreDatasource _ds;
   final _uuid = const Uuid();
 
   TimetableRepository({
     required FirebaseFirestore firestore,
     required FirebaseAuth auth,
+    required FirestoreDatasource datasource,
   })  : _firestore = firestore,
-        _auth = auth;
+        _auth = auth,
+        _ds = datasource;
 
   String get _uid => _auth.currentUser!.uid;
 
@@ -41,6 +48,16 @@ class TimetableRepository {
 
   CollectionReference<Map<String, dynamic>> get _semestersCol =>
       _firestore.collection('users').doc(_uid).collection('semesters');
+
+  // ── Active Timetable Guard ────────────────────────────────────────────────
+
+  /// Returns true if the user already has timetable entries saved.
+  Future<bool> hasActiveTimetable() => _ds.hasActiveTimetable(_uid);
+
+  /// Deletes ALL timetable-related data for the current user.
+  /// Used before uploading a replacement timetable.
+  /// Clears: timetable_entries, class_sessions, subjects, attendance_logs, semesters.
+  Future<void> deleteAllUserData() => _ds.deleteAllTimetableData(_uid);
 
   // ── Watch all saved timetable entries (real-time) ─────────────────────────
 
@@ -334,7 +351,6 @@ class TimetableRepository {
       DateTime.now().day,
     );
 
-    // Only filter by subjectId in Firestore (single-field index, always exists)
     return _sessionsCol
         .where('subjectId', isEqualTo: subjectId)
         .snapshots()
@@ -342,7 +358,6 @@ class TimetableRepository {
       final all = snap.docs
           .map((d) => ClassSession.fromMap(d.data()))
           .toList();
-      // Filter future sessions and sort by date client-side
       final upcoming = all
           .where((s) => !s.date.isBefore(startOfToday))
           .toList()
@@ -351,8 +366,65 @@ class TimetableRepository {
     });
   }
 
+  // ── Mark attendance on a session (CORRECT VERSION) ────────────────────────
 
-  // ── Update attendance on a session ───────────────────────────────────────
+  /// Marks attendance for a session. Handles:
+  /// 1. Creating a new log + updating subject counters (first mark)
+  /// 2. Updating existing log + applying counter delta (re-mark)
+  /// 3. Duplicate prevention (only one log per session)
+  ///
+  /// [session] must have the correct display subject (override-aware).
+  Future<void> markSessionAttendance({
+    required ClassSession session,
+    required AttendanceStatus status,
+  }) async {
+    // Step 1: Check for existing log for this session
+    final existingLog = await _ds.getLogForSession(_uid, session.id);
+
+    if (existingLog == null) {
+      // First time marking this session → create new log + bump counters
+      final newLog = AttendanceLogModel(
+        id: _uuid.v4(),
+        subjectId: session.displaySubjectId,
+        subjectName: session.displaySubjectName,
+        status: status,
+        date: session.date,
+        startTime: session.displayStartTime,
+        endTime: session.displayEndTime,
+        sessionId: session.id,
+      );
+      await _ds.logAttendance(_uid, newLog);
+    } else {
+      // Already marked → update with delta correction
+      final oldStatus = existingLog.status;
+      final updatedLog = existingLog.copyWith(
+        status: status,
+        // Update subject if overridden
+        subjectId: session.displaySubjectId,
+        subjectName: session.displaySubjectName,
+      );
+      await _ds.updateAttendanceLog(_uid, updatedLog, oldStatus);
+    }
+
+    // Step 2: Update the session document's status field
+    await _sessionsCol.doc(session.id).update({'status': status.name});
+  }
+
+  /// Marks multiple sessions absent in batch. Used by "Mark Remaining Absent"
+  /// and "Mark Full Day Absent" features.
+  Future<void> markMultipleSessionsAbsent(List<ClassSession> sessions) async {
+    for (final session in sessions) {
+      // Skip already-marked and cancelled sessions
+      if (session.status != AttendanceStatus.notMarked) continue;
+      if (session.isCancelled) continue;
+      await markSessionAttendance(
+        session: session,
+        status: AttendanceStatus.absent,
+      );
+    }
+  }
+
+  // ── Legacy: Update session status only (for backward compat) ─────────────
 
   Future<void> markAttendance(
     String sessionId,
@@ -362,6 +434,23 @@ class TimetableRepository {
         .doc(sessionId)
         .update({'status': status.name});
   }
+
+  // ── Daily Overrides ───────────────────────────────────────────────────────
+
+  Future<void> saveDailyOverride(DailyScheduleOverride override) =>
+      _ds.saveDailyOverride(_uid, override);
+
+  Future<List<DailyScheduleOverride>> getDailyOverridesForDate(
+          DateTime date) =>
+      _ds.getDailyOverridesForDate(_uid, date);
+
+  Stream<List<DailyScheduleOverride>> watchDailyOverridesForDate(
+          DateTime date) =>
+      _ds.watchDailyOverridesForDate(_uid, date);
+
+  Future<void> deleteDailyOverride(
+          String overrideId, DateTime date) =>
+      _ds.deleteDailyOverride(_uid, overrideId, date);
 
   // ── Private helpers ───────────────────────────────────────────────────────
 

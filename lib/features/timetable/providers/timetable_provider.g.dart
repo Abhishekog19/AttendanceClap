@@ -6,29 +6,84 @@ part of 'timetable_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$timetableStreamHash() => r'771ea8e1b2c2e411d7d29fb12dbc61c30a4d7282';
+String _$todaySessionsStreamHash() =>
+    r'412472dc8b1caee04f65804068bba78ef7273226';
 
-/// See also [timetableStream].
-@ProviderFor(timetableStream)
-final timetableStreamProvider =
-    AutoDisposeStreamProvider<List<TimetableModel>>.internal(
-  timetableStream,
-  name: r'timetableStreamProvider',
+/// See also [todaySessionsStream].
+@ProviderFor(todaySessionsStream)
+final todaySessionsStreamProvider =
+    AutoDisposeStreamProvider<List<ClassSession>>.internal(
+  todaySessionsStream,
+  name: r'todaySessionsStreamProvider',
   debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
       ? null
-      : _$timetableStreamHash,
+      : _$todaySessionsStreamHash,
   dependencies: null,
   allTransitiveDependencies: null,
 );
 
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
-typedef TimetableStreamRef = AutoDisposeStreamProviderRef<List<TimetableModel>>;
-String _$todayClassesHash() => r'ec3abfbaeedff92cb879c38ed3a0b2f4f7d20f4e';
+typedef TodaySessionsStreamRef
+    = AutoDisposeStreamProviderRef<List<ClassSession>>;
+String _$todayOverridesStreamHash() =>
+    r'ec77c5610aaed59d5f6d9c242af9dd9183fb2388';
+
+/// See also [todayOverridesStream].
+@ProviderFor(todayOverridesStream)
+final todayOverridesStreamProvider =
+    AutoDisposeStreamProvider<List<DailyScheduleOverride>>.internal(
+  todayOverridesStream,
+  name: r'todayOverridesStreamProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$todayOverridesStreamHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef TodayOverridesStreamRef
+    = AutoDisposeStreamProviderRef<List<DailyScheduleOverride>>;
+String _$schedulePageDataHash() => r'e9e869fdcbdfceb15d9bef579d6107360fbb33fc';
+
+/// See also [schedulePageData].
+@ProviderFor(schedulePageData)
+final schedulePageDataProvider = AutoDisposeProvider<SchedulePageData>.internal(
+  schedulePageData,
+  name: r'schedulePageDataProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$schedulePageDataHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef SchedulePageDataRef = AutoDisposeProviderRef<SchedulePageData>;
+String _$clockTickHash() => r'f5e587d77891f0ad73da5505a687cb4f47b96747';
+
+/// See also [clockTick].
+@ProviderFor(clockTick)
+final clockTickProvider = AutoDisposeStreamProvider<DateTime>.internal(
+  clockTick,
+  name: r'clockTickProvider',
+  debugGetCreateSourceHash:
+      const bool.fromEnvironment('dart.vm.product') ? null : _$clockTickHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef ClockTickRef = AutoDisposeStreamProviderRef<DateTime>;
+String _$todayClassesHash() => r'1ead3d143200042a1caf5c0ccf5c2725affa0381';
 
 /// See also [todayClasses].
 @ProviderFor(todayClasses)
-final todayClassesProvider = AutoDisposeProvider<List<TimetableModel>>.internal(
+final todayClassesProvider = AutoDisposeProvider<List<ClassSession>>.internal(
   todayClasses,
   name: r'todayClassesProvider',
   debugGetCreateSourceHash:
@@ -39,12 +94,12 @@ final todayClassesProvider = AutoDisposeProvider<List<TimetableModel>>.internal(
 
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
-typedef TodayClassesRef = AutoDisposeProviderRef<List<TimetableModel>>;
-String _$currentClassHash() => r'ecb150fa17c8b9c8a3d486c221d0d47a5544245d';
+typedef TodayClassesRef = AutoDisposeProviderRef<List<ClassSession>>;
+String _$currentClassHash() => r'79ffd72672a980ba534d2ade9e289ae94346dfc2';
 
 /// See also [currentClass].
 @ProviderFor(currentClass)
-final currentClassProvider = AutoDisposeProvider<TimetableModel?>.internal(
+final currentClassProvider = AutoDisposeProvider<ClassSession?>.internal(
   currentClass,
   name: r'currentClassProvider',
   debugGetCreateSourceHash:
@@ -55,12 +110,12 @@ final currentClassProvider = AutoDisposeProvider<TimetableModel?>.internal(
 
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
-typedef CurrentClassRef = AutoDisposeProviderRef<TimetableModel?>;
-String _$nextClassHash() => r'99a907531171533dd4b398e7fc98690d3d3b1866';
+typedef CurrentClassRef = AutoDisposeProviderRef<ClassSession?>;
+String _$nextClassHash() => r'2658a96f4ca7e5f36ac47921956080e092461801';
 
 /// See also [nextClass].
 @ProviderFor(nextClass)
-final nextClassProvider = AutoDisposeProvider<TimetableModel?>.internal(
+final nextClassProvider = AutoDisposeProvider<ClassSession?>.internal(
   nextClass,
   name: r'nextClassProvider',
   debugGetCreateSourceHash:
@@ -71,22 +126,22 @@ final nextClassProvider = AutoDisposeProvider<TimetableModel?>.internal(
 
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
-typedef NextClassRef = AutoDisposeProviderRef<TimetableModel?>;
-String _$timetableNotifierHash() => r'24b22850638beb3f612a9b1ff9514dd032eb23a6';
+typedef NextClassRef = AutoDisposeProviderRef<ClassSession?>;
+String _$scheduleNotifierHash() => r'64bdba2acf5c98354a560eae23b3f339383293a3';
 
-/// See also [TimetableNotifier].
-@ProviderFor(TimetableNotifier)
-final timetableNotifierProvider =
-    AutoDisposeNotifierProvider<TimetableNotifier, bool>.internal(
-  TimetableNotifier.new,
-  name: r'timetableNotifierProvider',
+/// See also [ScheduleNotifier].
+@ProviderFor(ScheduleNotifier)
+final scheduleNotifierProvider = AutoDisposeNotifierProvider<ScheduleNotifier,
+    ScheduleNotifierState>.internal(
+  ScheduleNotifier.new,
+  name: r'scheduleNotifierProvider',
   debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
       ? null
-      : _$timetableNotifierHash,
+      : _$scheduleNotifierHash,
   dependencies: null,
   allTransitiveDependencies: null,
 );
 
-typedef _$TimetableNotifier = AutoDisposeNotifier<bool>;
+typedef _$ScheduleNotifier = AutoDisposeNotifier<ScheduleNotifierState>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

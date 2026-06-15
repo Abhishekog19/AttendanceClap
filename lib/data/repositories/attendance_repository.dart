@@ -41,6 +41,10 @@ class AttendanceRepository {
 
   // ── Write ─────────────────────────────────────────────────────────────────
 
+  /// Create a new attendance log and update subject counters atomically.
+  Future<void> logAttendance(AttendanceLogModel log) =>
+      _ds.logAttendance(_uid, log);
+
   /// Update a log's status and keep subject counters consistent.
   /// [oldStatus] is the status before the edit.
   Future<void> updateLog(
@@ -52,4 +56,11 @@ class AttendanceRepository {
   /// Delete a log and reverse its contribution to subject counters.
   Future<void> deleteLog(AttendanceLogModel log) =>
       _ds.deleteAttendanceLog(_uid, log);
+
+  // ── Lookup ────────────────────────────────────────────────────────────────
+
+  /// Returns the attendance log for a specific session, or null if not marked.
+  /// Used to check for duplicates before writing a new log.
+  Future<AttendanceLogModel?> getLogForSession(String sessionId) =>
+      _ds.getLogForSession(_uid, sessionId);
 }

@@ -1,7 +1,14 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
-enum AttendanceStatus { present, absent, late, cancelled }
+/// Attendance status for a class or attendance log.
+/// ─ present   : student was present
+/// ─ absent    : student was absent
+/// ─ late      : student attended but was late
+/// ─ cancelled : class was cancelled (does not count toward attendance)
+/// ─ notMarked : session exists but attendance has not been logged yet
+///              (used on ClassSession documents only — never stored in logs)
+enum AttendanceStatus { present, absent, late, cancelled, notMarked }
 
 class AttendanceLogModel extends Equatable {
   final String id;
@@ -17,6 +24,11 @@ class AttendanceLogModel extends Equatable {
   final String? startTime;
   final String? endTime;
 
+  /// Links this log to the specific ClassSession it was created from.
+  /// Used to detect duplicate markings and support History page edits.
+  /// May be null on logs created before this field was added.
+  final String? sessionId;
+
   const AttendanceLogModel({
     required this.id,
     required this.subjectId,
@@ -25,6 +37,7 @@ class AttendanceLogModel extends Equatable {
     required this.date,
     this.startTime,
     this.endTime,
+    this.sessionId,
   });
 
   factory AttendanceLogModel.fromJson(Map<String, dynamic> json, String docId) {
@@ -39,6 +52,7 @@ class AttendanceLogModel extends Equatable {
       date: (json['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
       startTime: json['startTime'] as String?,
       endTime: json['endTime'] as String?,
+      sessionId: json['sessionId'] as String?,
     );
   }
 
@@ -49,26 +63,30 @@ class AttendanceLogModel extends Equatable {
         'date': Timestamp.fromDate(date),
         if (startTime != null) 'startTime': startTime,
         if (endTime != null) 'endTime': endTime,
+        if (sessionId != null) 'sessionId': sessionId,
       };
 
   AttendanceLogModel copyWith({
+    String? subjectId,
     String? subjectName,
     AttendanceStatus? status,
     DateTime? date,
     String? startTime,
     String? endTime,
+    String? sessionId,
   }) =>
       AttendanceLogModel(
         id: id,
-        subjectId: subjectId,
+        subjectId: subjectId ?? this.subjectId,
         subjectName: subjectName ?? this.subjectName,
         status: status ?? this.status,
         date: date ?? this.date,
         startTime: startTime ?? this.startTime,
         endTime: endTime ?? this.endTime,
+        sessionId: sessionId ?? this.sessionId,
       );
 
   @override
   List<Object?> get props =>
-      [id, subjectId, subjectName, status, date, startTime, endTime];
+      [id, subjectId, subjectName, status, date, startTime, endTime, sessionId];
 }

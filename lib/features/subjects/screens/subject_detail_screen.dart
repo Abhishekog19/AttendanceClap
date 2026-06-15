@@ -690,6 +690,7 @@ class _SubjectLogTile extends StatelessWidget {
         AttendanceStatus.absent => AppColors.error,
         AttendanceStatus.late => AppColors.warning,
         AttendanceStatus.cancelled => AppColors.outline,
+        AttendanceStatus.notMarked => AppColors.outline,
       };
 
   IconData _statusIcon(AttendanceStatus s) => switch (s) {
@@ -697,6 +698,7 @@ class _SubjectLogTile extends StatelessWidget {
         AttendanceStatus.absent => Icons.cancel_rounded,
         AttendanceStatus.late => Icons.access_time_filled,
         AttendanceStatus.cancelled => Icons.event_busy_rounded,
+        AttendanceStatus.notMarked => Icons.radio_button_unchecked,
       };
 
   String _statusLabel(AttendanceStatus s) => switch (s) {
@@ -704,6 +706,7 @@ class _SubjectLogTile extends StatelessWidget {
         AttendanceStatus.absent => 'Absent',
         AttendanceStatus.late => 'Late',
         AttendanceStatus.cancelled => 'Cancelled',
+        AttendanceStatus.notMarked => 'Not Marked',
       };
 }
 

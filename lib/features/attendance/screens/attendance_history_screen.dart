@@ -7,6 +7,7 @@ import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../data/models/attendance_log_model.dart';
 import '../../../data/models/subject_model.dart';
+import '../../../data/repositories/attendance_repository.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 import '../providers/attendance_history_provider.dart';
 
@@ -319,6 +320,7 @@ class _FilterRow extends ConsumerWidget {
         AttendanceStatus.absent => 'Absent',
         AttendanceStatus.late => 'Late',
         AttendanceStatus.cancelled => 'Cancelled',
+        AttendanceStatus.notMarked => 'Not Marked',
       };
 
   IconData _statusIcon(AttendanceStatus s) => switch (s) {
@@ -326,6 +328,7 @@ class _FilterRow extends ConsumerWidget {
         AttendanceStatus.absent => Icons.cancel_outlined,
         AttendanceStatus.late => Icons.access_time,
         AttendanceStatus.cancelled => Icons.event_busy_outlined,
+        AttendanceStatus.notMarked => Icons.radio_button_unchecked,
       };
 
   Color _statusColor(AttendanceStatus s) => switch (s) {
@@ -333,6 +336,7 @@ class _FilterRow extends ConsumerWidget {
         AttendanceStatus.absent => AppColors.error,
         AttendanceStatus.late => AppColors.warning,
         AttendanceStatus.cancelled => AppColors.outline,
+        AttendanceStatus.notMarked => AppColors.outline,
       };
 
   String _presetLabel(DateRangePreset p) => switch (p) {
@@ -576,13 +580,29 @@ class _LogTile extends ConsumerWidget {
             onSelected: (v) {
               if (v == 'edit') {
                 _showEditDialog(context, ref, log, subjects);
+              } else if (v == 'change_subject') {
+                _showChangeSubjectDialog(context, ref, log, subjects);
+              } else if (v == 'cancel') {
+                _cancelOrRestorePeriod(context, ref, log, subjectName, cancel: true);
+              } else if (v == 'restore') {
+                _cancelOrRestorePeriod(context, ref, log, subjectName, cancel: false);
               } else if (v == 'delete') {
                 _showDeleteDialog(context, ref, log, subjectName);
               }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'edit', child: Text('Edit Status')),
-              PopupMenuItem(
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'edit', child: Text('Edit Status')),
+              const PopupMenuItem(
+                  value: 'change_subject', child: Text('Change Subject')),
+              if (log.status != AttendanceStatus.cancelled)
+                const PopupMenuItem(
+                    value: 'cancel',
+                    child: Text('Cancel Period',
+                        style: TextStyle(color: AppColors.warning)))
+              else
+                const PopupMenuItem(
+                    value: 'restore', child: Text('Restore Period')),
+              const PopupMenuItem(
                   value: 'delete',
                   child: Text('Delete',
                       style: TextStyle(color: AppColors.error))),
@@ -600,6 +620,101 @@ class _LogTile extends ConsumerWidget {
       backgroundColor: Colors.transparent,
       builder: (_) => _EditLogSheet(log: log),
     );
+  }
+
+  void _showChangeSubjectDialog(BuildContext context, WidgetRef ref,
+      AttendanceLogModel log, List<SubjectModel> subjects) {
+    if (subjects.isEmpty) return;
+    String? selectedId;
+    String? selectedName;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: const Text('Change Subject'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Reassign this attendance record to a different subject. Counters for both old and new subject will be updated.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              ...subjects.map(
+                (s) => RadioListTile<String>(
+                  title: Text(s.name),
+                  value: s.id,
+                  groupValue: selectedId,
+                  dense: true,
+                  onChanged: (v) => setS(() {
+                    selectedId = v;
+                    selectedName = s.name;
+                  }),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            FilledButton(
+              onPressed: selectedId == null
+                  ? null
+                  : () async {
+                      Navigator.pop(ctx);
+                      // Delete old log (reverses counters on old subject)
+                      final notifier = ref.read(logEditNotifierProvider.notifier);
+                      await notifier.deleteLog(log);
+                      // Create new log for new subject
+                      final newLog = log.copyWith(
+                        subjectId: selectedId,
+                        subjectName: selectedName,
+                      );
+                      await ref.read(attendanceRepositoryProvider).logAttendance(newLog);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                                'Moved to $selectedName'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    },
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _cancelOrRestorePeriod(
+    BuildContext context,
+    WidgetRef ref,
+    AttendanceLogModel log,
+    String subjectName, {
+    required bool cancel,
+  }) async {
+    final oldStatus = log.status;
+    final newStatus =
+        cancel ? AttendanceStatus.cancelled : AttendanceStatus.present;
+    if (oldStatus == newStatus) return;
+    await ref.read(logEditNotifierProvider.notifier).updateLog(
+          log.copyWith(status: newStatus),
+          oldStatus,
+        );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(cancel
+              ? '$subjectName marked as cancelled'
+              : '$subjectName restored'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   void _showDeleteDialog(BuildContext context, WidgetRef ref,
@@ -638,6 +753,7 @@ class _LogTile extends ConsumerWidget {
         AttendanceStatus.absent => AppColors.error,
         AttendanceStatus.late => AppColors.warning,
         AttendanceStatus.cancelled => AppColors.outline,
+        AttendanceStatus.notMarked => AppColors.outline,
       };
 
   IconData _statusIcon(AttendanceStatus s) => switch (s) {
@@ -645,6 +761,7 @@ class _LogTile extends ConsumerWidget {
         AttendanceStatus.absent => Icons.cancel_rounded,
         AttendanceStatus.late => Icons.access_time_filled,
         AttendanceStatus.cancelled => Icons.event_busy_rounded,
+        AttendanceStatus.notMarked => Icons.radio_button_unchecked,
       };
 
   String _statusLabel(AttendanceStatus s) => switch (s) {
@@ -652,6 +769,7 @@ class _LogTile extends ConsumerWidget {
         AttendanceStatus.absent => 'Absent',
         AttendanceStatus.late => 'Late',
         AttendanceStatus.cancelled => 'Cancelled',
+        AttendanceStatus.notMarked => 'Not Marked',
       };
 }
 
@@ -747,6 +865,7 @@ class _EditLogSheet extends ConsumerWidget {
         AttendanceStatus.absent => AppColors.error,
         AttendanceStatus.late => AppColors.warning,
         AttendanceStatus.cancelled => AppColors.outline,
+        AttendanceStatus.notMarked => AppColors.outline,
       };
 
   IconData _statusIcon(AttendanceStatus s) => switch (s) {
@@ -754,6 +873,7 @@ class _EditLogSheet extends ConsumerWidget {
         AttendanceStatus.absent => Icons.cancel_rounded,
         AttendanceStatus.late => Icons.access_time_filled,
         AttendanceStatus.cancelled => Icons.event_busy_rounded,
+        AttendanceStatus.notMarked => Icons.radio_button_unchecked,
       };
 }
 

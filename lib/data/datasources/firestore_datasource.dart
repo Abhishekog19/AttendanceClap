@@ -5,6 +5,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../models/subject_model.dart';
 import '../models/timetable_model.dart';
 import '../models/attendance_log_model.dart';
+import '../models/daily_schedule_override_model.dart';
 import '../models/user_model.dart';
 
 part 'firestore_datasource.g.dart';
@@ -130,6 +131,18 @@ class FirestoreDatasource {
     });
   }
 
+  /// Returns the existing log for a session, or null if not yet marked.
+  Future<AttendanceLogModel?> getLogForSession(
+      String uid, String sessionId) async {
+    final snap = await _logsRef(uid)
+        .where('sessionId', isEqualTo: sessionId)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    final doc = snap.docs.first;
+    return AttendanceLogModel.fromJson(doc.data(), doc.id);
+  }
+
   /// Writes a log and atomically bumps the subject counters.
   Future<void> logAttendance(String uid, AttendanceLogModel log) async {
     final batch = _db.batch();
@@ -188,7 +201,8 @@ class FirestoreDatasource {
 
     final subjectRef = _subjectsRef(uid).doc(log.subjectId);
     // Reverse the effect of the original status
-    final delta = _counterDelta(oldStatus: log.status, newStatus: AttendanceStatus.cancelled);
+    final delta = _counterDelta(
+        oldStatus: log.status, newStatus: AttendanceStatus.cancelled);
     if (delta['attendedClasses'] != 0 || delta['totalClasses'] != 0) {
       final update = <String, dynamic>{
         'updatedAt': FieldValue.serverTimestamp(),
@@ -230,6 +244,94 @@ class FirestoreDatasource {
         .toList();
   }
 
+  // ─── Daily Schedule Overrides ─────────────────────────────────────────────────
+
+  CollectionReference<Map<String, dynamic>> _dailyOverridesRef(
+          String uid, String dateKey) =>
+      _userDoc(uid).collection('daily_overrides').doc(dateKey).collection('sessions');
+
+  String _dateKey(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+  Future<void> saveDailyOverride(
+      String uid, DailyScheduleOverride override) async {
+    final dateKey = _dateKey(override.date);
+    await _dailyOverridesRef(uid, dateKey)
+        .doc(override.id)
+        .set(override.toMap());
+  }
+
+  Future<List<DailyScheduleOverride>> getDailyOverridesForDate(
+      String uid, DateTime date) async {
+    final dateKey = _dateKey(date);
+    final snap = await _dailyOverridesRef(uid, dateKey).get();
+    return snap.docs
+        .map((doc) => DailyScheduleOverride.fromMap(doc.data()))
+        .toList();
+  }
+
+  Stream<List<DailyScheduleOverride>> watchDailyOverridesForDate(
+      String uid, DateTime date) {
+    final dateKey = _dateKey(date);
+    return _dailyOverridesRef(uid, dateKey)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((doc) => DailyScheduleOverride.fromMap(doc.data()))
+            .toList());
+  }
+
+  Future<void> deleteDailyOverride(
+      String uid, String overrideId, DateTime date) async {
+    final dateKey = _dateKey(date);
+    await _dailyOverridesRef(uid, dateKey).doc(overrideId).delete();
+  }
+
+  // ─── Delete All User Data (for timetable replacement) ────────────────────────
+
+  /// Deletes all timetable-related data for a user.
+  /// Used when the user wants to replace their active timetable.
+  /// Collections cleared: timetable_entries, class_sessions, subjects,
+  ///   attendance_logs, semesters.
+  Future<void> deleteAllTimetableData(String uid) async {
+    final collections = [
+      _userDoc(uid).collection('timetable_entries'),
+      _userDoc(uid).collection('class_sessions'),
+      _userDoc(uid).collection('subjects'),
+      _userDoc(uid).collection('attendance_logs'),
+      _userDoc(uid).collection('semesters'),
+    ];
+
+    for (final col in collections) {
+      await _deleteCollection(col);
+    }
+  }
+
+  Future<void> _deleteCollection(
+      CollectionReference<Map<String, dynamic>> col) async {
+    const batchSize = 500;
+    QuerySnapshot<Map<String, dynamic>> snap;
+    do {
+      snap = await col.limit(batchSize).get();
+      if (snap.docs.isEmpty) break;
+      final batch = _db.batch();
+      for (final doc in snap.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    } while (snap.docs.length == batchSize);
+  }
+
+  /// Returns true if the user has any timetable entries saved.
+  Future<bool> hasActiveTimetable(String uid) async {
+    final snap = await _userDoc(uid)
+        .collection('timetable_entries')
+        .limit(1)
+        .get();
+    return snap.docs.isNotEmpty;
+  }
+
+  // ─── Counter delta helper ─────────────────────────────────────────────────────
+
   /// Computes the signed counter delta when changing from [oldStatus] → [newStatus].
   static Map<String, int> _counterDelta({
     required AttendanceStatus oldStatus,
@@ -259,4 +361,3 @@ class FirestoreDatasource {
     return {'attendedClasses': attended, 'totalClasses': total};
   }
 }
-

@@ -5,11 +5,46 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../data/repositories/timetable_repository.dart';
 import '../providers/timetable_ocr_provider.dart';
+
+part 'timetable_upload_screen.g.dart';
+
+// ── Provider: check if active timetable exists ────────────────────────────────
+
+@riverpod
+Future<bool> activeTimetableExists(Ref ref) {
+  return ref.watch(timetableRepositoryProvider).hasActiveTimetable();
+}
+
+// ── Provider: replace timetable notifier ──────────────────────────────────────
+
+enum ReplaceStatus { idle, deleting, done, error }
+
+@riverpod
+class ReplaceTimetableNotifier extends _$ReplaceTimetableNotifier {
+  @override
+  ReplaceStatus build() => ReplaceStatus.idle;
+
+  Future<void> replaceAll() async {
+    state = ReplaceStatus.deleting;
+    try {
+      await ref.read(timetableRepositoryProvider).deleteAllUserData();
+      // Invalidate the active timetable check so the upload UI appears
+      ref.invalidate(activeTimetableExistsProvider);
+      state = ReplaceStatus.done;
+    } catch (_) {
+      state = ReplaceStatus.error;
+    }
+  }
+}
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
 
 class TimetableUploadScreen extends ConsumerStatefulWidget {
   const TimetableUploadScreen({super.key});
@@ -46,6 +81,8 @@ class _TimetableUploadScreenState
   @override
   Widget build(BuildContext context) {
     final ocrState = ref.watch(timetableOcrProvider);
+    final activeTimetableAsync = ref.watch(activeTimetableExistsProvider);
+    final replaceStatus = ref.watch(replaceTimetableNotifierProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
     final bg = isDark ? AppColors.darkSurface : AppColors.background;
@@ -57,7 +94,6 @@ class _TimetableUploadScreenState
     // Navigate to review when OCR succeeds
     ref.listen(timetableOcrProvider, (prev, next) {
       if (next.status == OcrStatus.success) {
-        // editedTimetableProvider is already set in the OCR notifier
         context.push('/timetable/review');
       }
     });
@@ -67,6 +103,8 @@ class _TimetableUploadScreenState
         ocrState.status == OcrStatus.extracting ||
         ocrState.status == OcrStatus.parsing;
 
+    final isReplacing = replaceStatus == ReplaceStatus.deleting;
+
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
@@ -74,137 +112,138 @@ class _TimetableUploadScreenState
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new),
-          onPressed: isProcessing ? null : () => context.pop(),
+          onPressed: (isProcessing || isReplacing) ? null : () => context.pop(),
         ),
         title: Text(
           'Import Timetable',
           style: AppTextStyles.headlineMd.copyWith(color: onSurface),
         ),
       ),
-      body: isProcessing
-          ? _ProcessingView(
+      body: activeTimetableAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, __) => _UploadBody(
+          pulse: _pulse,
+          primary: primary,
+          surface: surface,
+          onSurface: onSurface,
+          onSurfaceVariant: onSurfaceVariant,
+          ocrState: ocrState,
+          isProcessing: isProcessing,
+          onCamera: _pickFromCamera,
+          onGallery: _pickFromGallery,
+          onPdf: _pickPdf,
+          onRetry: () => ref.read(timetableOcrProvider.notifier).retry(),
+        ),
+        data: (hasActive) {
+          if (hasActive && replaceStatus != ReplaceStatus.done) {
+            // Show locked state — timetable exists
+            return _ActiveTimetableLockedView(
+              isDark: isDark,
+              primary: primary,
+              onSurface: onSurface,
+              onSurfaceVariant: onSurfaceVariant,
+              isReplacing: isReplacing,
+              onReplace: () => _showReplaceConfirmation(context, ref),
+            );
+          }
+
+          if (isProcessing) {
+            return _ProcessingView(
               state: ocrState,
               primaryColor: primary,
               onSurface: onSurface,
               onSurfaceVariant: onSurfaceVariant,
-            )
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ── Hero illustration ──────────────────────────────────────
-                  Center(
-                    child: ScaleTransition(
-                      scale: _pulse,
-                      child: Container(
-                        width: 140,
-                        height: 140,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              primary.withValues(alpha: 0.15),
-                              primary.withValues(alpha: 0.05),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: primary.withValues(alpha: 0.3),
-                            width: 2,
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.document_scanner_outlined,
-                          size: 64,
-                          color: primary,
-                        ),
-                      ),
-                    ),
-                  ),
+            );
+          }
 
-                  const SizedBox(height: AppSpacing.xl),
+          return _UploadBody(
+            pulse: _pulse,
+            primary: primary,
+            surface: surface,
+            onSurface: onSurface,
+            onSurfaceVariant: onSurfaceVariant,
+            ocrState: ocrState,
+            isProcessing: isProcessing,
+            onCamera: _pickFromCamera,
+            onGallery: _pickFromGallery,
+            onPdf: _pickPdf,
+            onRetry: () => ref.read(timetableOcrProvider.notifier).retry(),
+          );
+        },
+      ),
+    );
+  }
 
-                  Text(
-                    'Scan Your Timetable',
-                    style: AppTextStyles.headlineLg.copyWith(color: onSurface),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    'Upload a photo, screenshot, or PDF of your class '
-                    'timetable. Our AI will extract all subjects, timings, '
-                    'and faculty automatically.',
-                    style: AppTextStyles.bodyLg.copyWith(
-                      color: onSurfaceVariant,
-                      height: 1.5,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
+  Future<void> _showReplaceConfirmation(
+      BuildContext context, WidgetRef ref) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg =
+        isDark ? AppColors.darkSurfaceContainer : AppColors.surfaceContainerLowest;
 
-                  const SizedBox(height: AppSpacing.xxl),
-
-                  // ── Upload options ─────────────────────────────────────────
-                  Text(
-                    'CHOOSE SOURCE',
-                    style: AppTextStyles.labelCaps.copyWith(
-                      color: onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-
-                  _UploadOptionCard(
-                    icon: Icons.camera_alt_outlined,
-                    title: 'Take a Photo',
-                    subtitle: 'Capture your printed timetable',
-                    badge: 'PNG · JPG',
-                    color: Colors.blue,
-                    onTap: _pickFromCamera,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  _UploadOptionCard(
-                    icon: Icons.photo_library_outlined,
-                    title: 'Choose from Gallery',
-                    subtitle: 'Select an existing screenshot',
-                    badge: 'PNG · JPG',
-                    color: Colors.purple,
-                    onTap: _pickFromGallery,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  _UploadOptionCard(
-                    icon: Icons.picture_as_pdf_outlined,
-                    title: 'Upload PDF',
-                    subtitle: 'Import from university portal — up to 10 pages',
-                    badge: 'PDF',
-                    color: Colors.red,
-                    onTap: _pickPdf,
-                  ),
-
-                  // ── Error banner ───────────────────────────────────────────
-                  if (ocrState.status == OcrStatus.error) ...[
-                    const SizedBox(height: AppSpacing.lg),
-                    _ErrorBanner(
-                      message: ocrState.errorMessage ?? 'Unknown error',
-                      retryable: ocrState.retryable,
-                      onRetry: ocrState.retryable
-                          ? () => ref
-                              .read(timetableOcrProvider.notifier)
-                              .retry()
-                          : null,
-                    ),
-                  ],
-
-                  const SizedBox(height: AppSpacing.xxl),
-
-                  // ── Tips ──────────────────────────────────────────────────
-                  _TipsSection(
-                      surface: surface,
-                      onSurfaceVariant: onSurfaceVariant),
-                ],
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.all(AppSpacing.md),
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.warning_rounded,
+                  color: AppColors.error, size: 30),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text('Replace Active Timetable?',
+                style: AppTextStyles.headlineMd,
+                textAlign: TextAlign.center),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'This will permanently delete your current timetable, all subjects, attendance logs, and analytics data. This action cannot be undone.',
+              style: AppTextStyles.bodyLg.copyWith(
+                color: isDark
+                    ? AppColors.darkOnSurfaceVariant
+                    : AppColors.onSurfaceVariant,
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.error),
+                child: const Text('Yes, Replace Everything'),
               ),
             ),
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
+
+    if (confirmed == true && mounted) {
+      await ref.read(replaceTimetableNotifierProvider.notifier).replaceAll();
+    }
   }
 
   Future<void> _pickFromCamera() async {
@@ -241,6 +280,254 @@ class _TimetableUploadScreenState
           .read(timetableOcrProvider.notifier)
           .processFile(File(result.files.single.path!));
     }
+  }
+}
+
+// ── Locked State View ─────────────────────────────────────────────────────────
+
+class _ActiveTimetableLockedView extends StatelessWidget {
+  final bool isDark;
+  final Color primary;
+  final Color onSurface;
+  final Color onSurfaceVariant;
+  final bool isReplacing;
+  final VoidCallback onReplace;
+
+  const _ActiveTimetableLockedView({
+    required this.isDark,
+    required this.primary,
+    required this.onSurface,
+    required this.onSurfaceVariant,
+    required this.isReplacing,
+    required this.onReplace,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.lock_outlined,
+                  size: 48, color: AppColors.warning),
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            Text(
+              'Active Timetable Exists',
+              style: AppTextStyles.headlineLg.copyWith(color: onSurface),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'An active timetable already exists. Replace it to continue.',
+              style: AppTextStyles.bodyLg.copyWith(
+                color: onSurfaceVariant,
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Replacing will delete all subjects, attendance logs, and analytics.',
+              style: AppTextStyles.bodySm.copyWith(
+                color: AppColors.error.withValues(alpha: 0.8),
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.xxl),
+            if (isReplacing) ...[
+              const CircularProgressIndicator(),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                'Deleting existing data…',
+                style: AppTextStyles.bodyLg.copyWith(color: onSurfaceVariant),
+              ),
+            ] else
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: onReplace,
+                  icon: const Icon(Icons.swap_horiz_rounded),
+                  label: const Text('Replace Timetable'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.error,
+                    padding:
+                        const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                    shape: RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.circular(AppSpacing.radiusMd),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Upload Body ───────────────────────────────────────────────────────────────
+
+class _UploadBody extends StatelessWidget {
+  final Animation<double> pulse;
+  final Color primary;
+  final Color surface;
+  final Color onSurface;
+  final Color onSurfaceVariant;
+  final OcrState ocrState;
+  final bool isProcessing;
+  final VoidCallback onCamera;
+  final VoidCallback onGallery;
+  final VoidCallback onPdf;
+  final VoidCallback onRetry;
+
+  const _UploadBody({
+    required this.pulse,
+    required this.primary,
+    required this.surface,
+    required this.onSurface,
+    required this.onSurfaceVariant,
+    required this.ocrState,
+    required this.isProcessing,
+    required this.onCamera,
+    required this.onGallery,
+    required this.onPdf,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isProcessing) {
+      return _ProcessingView(
+        state: ocrState,
+        primaryColor: primary,
+        onSurface: onSurface,
+        onSurfaceVariant: onSurfaceVariant,
+      );
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Hero illustration ──────────────────────────────────────
+          Center(
+            child: ScaleTransition(
+              scale: pulse,
+              child: Container(
+                width: 140,
+                height: 140,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      primary.withValues(alpha: 0.15),
+                      primary.withValues(alpha: 0.05),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: primary.withValues(alpha: 0.3),
+                    width: 2,
+                  ),
+                ),
+                child: Icon(
+                  Icons.document_scanner_outlined,
+                  size: 64,
+                  color: primary,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.xl),
+
+          Text(
+            'Scan Your Timetable',
+            style: AppTextStyles.headlineLg.copyWith(color: onSurface),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Upload a photo, screenshot, or PDF of your class '
+            'timetable. Our AI will extract all subjects, timings, '
+            'and faculty automatically.',
+            style: AppTextStyles.bodyLg.copyWith(
+              color: onSurfaceVariant,
+              height: 1.5,
+            ),
+            textAlign: TextAlign.center,
+          ),
+
+          const SizedBox(height: AppSpacing.xxl),
+
+          // ── Upload options ─────────────────────────────────────────
+          Text(
+            'CHOOSE SOURCE',
+            style: AppTextStyles.labelCaps.copyWith(
+              color: onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+
+          _UploadOptionCard(
+            icon: Icons.camera_alt_outlined,
+            title: 'Take a Photo',
+            subtitle: 'Capture your printed timetable',
+            badge: 'PNG · JPG',
+            color: Colors.blue,
+            onTap: onCamera,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          _UploadOptionCard(
+            icon: Icons.photo_library_outlined,
+            title: 'Choose from Gallery',
+            subtitle: 'Select an existing screenshot',
+            badge: 'PNG · JPG',
+            color: Colors.purple,
+            onTap: onGallery,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          _UploadOptionCard(
+            icon: Icons.picture_as_pdf_outlined,
+            title: 'Upload PDF',
+            subtitle: 'Import from university portal — up to 10 pages',
+            badge: 'PDF',
+            color: Colors.red,
+            onTap: onPdf,
+          ),
+
+          // ── Error banner ───────────────────────────────────────────
+          if (ocrState.status == OcrStatus.error) ...[
+            const SizedBox(height: AppSpacing.lg),
+            _ErrorBanner(
+              message: ocrState.errorMessage ?? 'Unknown error',
+              retryable: ocrState.retryable,
+              onRetry: ocrState.retryable ? onRetry : null,
+            ),
+          ],
+
+          const SizedBox(height: AppSpacing.xxl),
+
+          // ── Tips ──────────────────────────────────────────────────
+          _TipsSection(
+              surface: surface, onSurfaceVariant: onSurfaceVariant),
+        ],
+      ),
+    );
   }
 }
 
@@ -300,7 +587,6 @@ class _ProcessingView extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Progress indicator with subtle PDF page counter
             Stack(
               alignment: Alignment.center,
               children: [
@@ -345,7 +631,6 @@ class _ProcessingView extends StatelessWidget {
                 color: onSurfaceVariant.withValues(alpha: 0.6),
               ),
             ),
-            // Pipeline step indicators
             const SizedBox(height: AppSpacing.xxl),
             _PipelineSteps(currentStatus: state.status),
           ],
@@ -388,7 +673,6 @@ class _PipelineSteps extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(_steps.length * 2 - 1, (i) {
         if (i.isOdd) {
-          // Connector line
           final stepIdx = i ~/ 2;
           return Container(
             width: 24,
@@ -475,8 +759,7 @@ class _ErrorBanner extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.error_outline,
-                  color: AppColors.error, size: 20),
+              const Icon(Icons.error_outline, color: AppColors.error, size: 20),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
@@ -569,14 +852,14 @@ class _UploadOptionCard extends StatelessWidget {
                         style: AppTextStyles.bodyLg.copyWith(
                             color: onSurface, fontWeight: FontWeight.w600)),
                     Text(subtitle,
-                        style: AppTextStyles.bodySm.copyWith(
-                            color: onSurfaceVariant)),
+                        style: AppTextStyles.bodySm
+                            .copyWith(color: onSurfaceVariant)),
                   ],
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 3),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(4),

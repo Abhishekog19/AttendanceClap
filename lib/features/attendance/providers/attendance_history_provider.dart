@@ -90,6 +90,8 @@ class AttendanceStats {
           l++;
         case AttendanceStatus.cancelled:
           c++;
+        case AttendanceStatus.notMarked:
+          break; // notMarked logs are not counted in stats
       }
     }
     return AttendanceStats(

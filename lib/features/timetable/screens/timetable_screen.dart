@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,40 +8,62 @@ import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../data/models/attendance_log_model.dart';
-import '../../../data/models/timetable_model.dart';
+import '../../../data/models/class_session_model.dart';
 import '../../../shared/widgets/empty_state_widget.dart';
 import '../providers/timetable_provider.dart';
+import 'edit_today_schedule_sheet.dart';
 
-class TimetableScreen extends ConsumerWidget {
+class TimetableScreen extends ConsumerStatefulWidget {
   const TimetableScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final todayClasses = ref.watch(todayClassesProvider);
-    final currentClass = ref.watch(currentClassProvider);
-    final nextClass = ref.watch(nextClassProvider);
+  ConsumerState<TimetableScreen> createState() => _TimetableScreenState();
+}
+
+class _TimetableScreenState extends ConsumerState<TimetableScreen> {
+  Timer? _clockTimer;
+  bool _completedExpanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Tick every minute so current/upcoming buckets re-evaluate
+    _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheduleData = ref.watch(schedulePageDataProvider);
+    final todayAsync = ref.watch(todaySessionsStreamProvider);
+    final notifier = ref.read(scheduleNotifierProvider.notifier);
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
     final bg = isDark ? AppColors.darkSurface : AppColors.background;
     final onSurface = isDark ? AppColors.darkOnSurface : AppColors.onSurface;
-    final onSurfaceVariant = isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
+    final onSurfaceVariant =
+        isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
 
     final now = DateTime.now();
     final dayName = DateFormat('EEEE, MMM d').format(now);
-    final remaining = todayClasses.where((c) {
-      final start = _parseTime(c.startTime);
-      final nowTod = TimeOfDay.now();
-      return start.hour > nowTod.hour ||
-          (start.hour == nowTod.hour && start.minute > nowTod.minute);
-    }).toList();
+
+    final allSessions = todayAsync.valueOrNull ?? [];
+    final hasAnyClasses = scheduleData.totalTodayCount > 0 || allSessions.isNotEmpty;
 
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
         backgroundColor: bg.withAlpha(230),
         title: Text(
-          'AttendanceAI',
+          'Schedule',
           style: AppTextStyles.headlineMd.copyWith(color: primary),
         ),
         actions: [
@@ -50,92 +74,350 @@ class TimetableScreen extends ConsumerWidget {
           ),
           IconButton(
             icon: Icon(Icons.document_scanner_outlined, color: onSurfaceVariant),
-            tooltip: 'Import via OCR',
+            tooltip: 'Import Timetable',
             onPressed: () => context.push('/timetable/upload'),
           ),
-          IconButton(
-            icon: Icon(Icons.notifications_outlined, color: onSurfaceVariant),
-            onPressed: () {},
-          ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/timetable/manual-entry'),
-        backgroundColor: primary,
-        foregroundColor: Colors.white,
-        tooltip: 'Add Class',
-        child: const Icon(Icons.add),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md, AppSpacing.md, AppSpacing.md, 100),
-        children: [
-          Text(
-            "Today's Schedule",
-            style: AppTextStyles.headlineLg.copyWith(color: onSurface),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            '$dayName • ${remaining.length} Classes remaining',
-            style: AppTextStyles.bodyLg.copyWith(color: onSurfaceVariant),
-          ),
-          const SizedBox(height: AppSpacing.xl),
-
-          // ─── Currently In ──────────────────────────────────────────────────
-          if (currentClass != null) ...[
-            _SectionHeader(
-              dotColor: primary,
-              label: 'CURRENTLY IN',
-              animated: true,
+      body: todayAsync.when(
+        loading: () =>
+            const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(
+          child: Text('Error: $e',
+              style: AppTextStyles.bodyLg.copyWith(color: AppColors.error)),
+        ),
+        data: (_) {
+          if (!hasAnyClasses) {
+            return _EmptySchedule(
               isDark: isDark,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            _CurrentClassCard(entry: currentClass, ref: ref, isDark: isDark),
-            const SizedBox(height: AppSpacing.xl),
-          ],
+              primary: primary,
+              onSurface: onSurface,
+              onSurfaceVariant: onSurfaceVariant,
+            );
+          }
 
-          // ─── Next Up ───────────────────────────────────────────────────────
-          if (nextClass != null) ...[
-            _SectionHeader(label: 'NEXT UP', isDark: isDark),
-            const SizedBox(height: AppSpacing.md),
-            _NextClassCard(entry: nextClass, ref: ref, isDark: isDark),
-            const SizedBox(height: AppSpacing.xl),
-          ],
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md, AppSpacing.md, AppSpacing.md, 100),
+            children: [
+              // ─── TODAY HEADER ───────────────────────────────────────────────
+              _TodayHeader(
+                dayName: dayName,
+                totalClasses: scheduleData.totalTodayCount,
+                upcomingCount: scheduleData.upcoming.length,
+                isDark: isDark,
+                primary: primary,
+                onSurface: onSurface,
+                onSurfaceVariant: onSurfaceVariant,
+              ),
+              const SizedBox(height: AppSpacing.md),
 
-          // ─── Remaining Today ───────────────────────────────────────────────
-          if (remaining.isNotEmpty) ...[
-            _SectionHeader(label: 'REMAINING TODAY', isDark: isDark),
-            const SizedBox(height: AppSpacing.md),
-            ...remaining.skip(nextClass != null ? 1 : 0).map(
-                  (entry) => Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                    child: _RemainingClassCard(entry: entry, ref: ref, isDark: isDark),
+              // ─── ACTION BUTTONS ROW ────────────────────────────────────────
+              Row(
+                children: [
+                  Expanded(
+                    child: _ActionButton(
+                      icon: Icons.edit_calendar_outlined,
+                      label: 'Edit Today',
+                      isDark: isDark,
+                      onTap: () => _showEditSheet(context, allSessions),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: _ActionButton(
+                      icon: Icons.event_busy_outlined,
+                      label: 'Mark Absent',
+                      isDark: isDark,
+                      isDestructive: true,
+                      onTap: () => _showMarkRemainingDialog(
+                          context, scheduleData, notifier, allSessions),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.xl),
+
+              // ─── CURRENT CLASS ─────────────────────────────────────────────
+              if (scheduleData.currentClass != null) ...[
+                _SectionHeader(
+                  dotColor: primary,
+                  label: 'CURRENT CLASS',
+                  animated: true,
+                  isDark: isDark,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _CurrentClassCard(
+                  session: scheduleData.currentClass!,
+                  isDark: isDark,
+                ),
+                const SizedBox(height: AppSpacing.xl),
+              ],
+
+              // ─── ACTION REQUIRED ───────────────────────────────────────────
+              if (scheduleData.actionRequired.isNotEmpty) ...[
+                _SectionHeader(
+                  dotColor: AppColors.warning,
+                  label: 'ACTION REQUIRED',
+                  isDark: isDark,
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  'These classes have ended. Please mark your attendance.',
+                  style: AppTextStyles.bodySm
+                      .copyWith(color: onSurfaceVariant),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                ...scheduleData.actionRequired.map(
+                  (session) => Padding(
+                    padding:
+                        const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: _ActionRequiredCard(
+                      session: session,
+                      isDark: isDark,
+                      onMark: (status) async {
+                        await notifier.markAttendance(
+                            session: session, status: status);
+                      },
+                    ),
                   ),
                 ),
-          ],
+                const SizedBox(height: AppSpacing.xl),
+              ],
 
-          if (todayClasses.isEmpty)
-            EmptyStateWidget(
-              icon: Icons.free_breakfast_outlined,
-              title: 'No classes today',
-              subtitle: 'Import your timetable to get started!',
-              actionLabel: 'Import Timetable',
-              onAction: () => context.push('/timetable/upload'),
-            ),
+              // ─── UPCOMING CLASSES ──────────────────────────────────────────
+              if (scheduleData.upcoming.isNotEmpty) ...[
+                _SectionHeader(label: 'UPCOMING CLASSES', isDark: isDark),
+                const SizedBox(height: AppSpacing.md),
+                ...scheduleData.upcoming.map(
+                  (session) => Padding(
+                    padding:
+                        const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: _UpcomingClassCard(
+                        session: session, isDark: isDark),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xl),
+              ],
 
-          // ─── AI Prediction Bento ───────────────────────────────────────────
-          const SizedBox(height: AppSpacing.md),
-          _AIPredictionBento(isDark: isDark),
-        ],
+              // ─── COMPLETED TODAY ───────────────────────────────────────────
+              if (scheduleData.completedToday.isNotEmpty) ...[
+                GestureDetector(
+                  onTap: () =>
+                      setState(() => _completedExpanded = !_completedExpanded),
+                  child: Row(
+                    children: [
+                      _SectionHeader(
+                          label: 'COMPLETED TODAY', isDark: isDark),
+                      const Spacer(),
+                      AnimatedRotation(
+                        turns: _completedExpanded ? 0.5 : 0,
+                        duration:
+                            const Duration(milliseconds: 200),
+                        child: Icon(Icons.expand_more,
+                            color: onSurfaceVariant, size: 18),
+                      ),
+                    ],
+                  ),
+                ),
+                AnimatedCrossFade(
+                  firstChild: const SizedBox(height: 0),
+                  secondChild: Column(
+                    children: [
+                      const SizedBox(height: AppSpacing.md),
+                      ...scheduleData.completedToday.map(
+                        (session) => Padding(
+                          padding: const EdgeInsets.only(
+                              bottom: AppSpacing.sm),
+                          child: _CompletedClassTile(
+                              session: session, isDark: isDark),
+                        ),
+                      ),
+                    ],
+                  ),
+                  crossFadeState: _completedExpanded
+                      ? CrossFadeState.showSecond
+                      : CrossFadeState.showFirst,
+                  duration: const Duration(milliseconds: 250),
+                ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
 
-  TimeOfDay _parseTime(String t) {
-    final parts = t.split(':');
-    return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+  void _showEditSheet(BuildContext context, List<ClassSession> sessions) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => EditTodayScheduleSheet(sessions: sessions),
+    );
+  }
+
+  Future<void> _showMarkRemainingDialog(
+    BuildContext context,
+    SchedulePageData data,
+    ScheduleNotifier notifier,
+    List<ClassSession> allSessions,
+  ) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark
+        ? AppColors.darkSurfaceContainer
+        : AppColors.surfaceContainerLowest;
+
+    final remaining = [
+      ...data.upcoming,
+      ...data.actionRequired,
+    ].where((s) =>
+        s.status == AttendanceStatus.notMarked && !s.isCancelled).toList();
+
+    final allCount = allSessions
+        .where((s) =>
+            s.status == AttendanceStatus.notMarked && !s.isCancelled)
+        .length;
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.all(AppSpacing.md),
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Mark Classes Absent',
+              style: AppTextStyles.headlineMd,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            if (remaining.isNotEmpty)
+              _AbsentChoiceCard(
+                icon: Icons.arrow_forward_rounded,
+                title: 'Mark Remaining Absent',
+                subtitle:
+                    '${remaining.length} upcoming & unmarked class${remaining.length == 1 ? '' : 'es'}',
+                color: AppColors.warning,
+                value: 'remaining',
+              ),
+            if (remaining.isNotEmpty) const SizedBox(height: AppSpacing.md),
+            if (allCount > 0)
+              _AbsentChoiceCard(
+                icon: Icons.calendar_today_rounded,
+                title: 'Mark Full Day Absent',
+                subtitle:
+                    '$allCount total unmarked class${allCount == 1 ? '' : 'es'} today',
+                color: AppColors.error,
+                value: 'fullday',
+              ),
+            if (remaining.isEmpty && allCount == 0)
+              Text(
+                'No unmarked classes remaining today.',
+                style: AppTextStyles.bodyLg,
+                textAlign: TextAlign.center,
+              ),
+            const SizedBox(height: AppSpacing.md),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!context.mounted) return;
+
+    if (choice == 'remaining') {
+      await notifier.markRemainingAbsent(remaining);
+    } else if (choice == 'fullday') {
+      await notifier.markFullDayAbsent(allSessions);
+    }
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Absent Choice Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AbsentChoiceCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final String value;
+
+  const _AbsentChoiceCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final surface =
+        isDark ? AppColors.darkSurfaceContainerHigh : AppColors.surfaceContainerLowest;
+
+    return Material(
+      color: surface,
+      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      child: InkWell(
+        onTap: () => Navigator.pop(context, value),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        child: Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            border: Border.all(color: color.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: AppTextStyles.bodyLg.copyWith(
+                            fontWeight: FontWeight.w600)),
+                    Text(subtitle,
+                        style: AppTextStyles.bodySm.copyWith(
+                            color: color)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: color),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Section Header
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
   final String label;
@@ -153,7 +435,8 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
-    final variant = isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
+    final variant =
+        isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
 
     return Row(
       children: [
@@ -164,7 +447,8 @@ class _SectionHeader extends StatelessWidget {
             Container(
               width: 8,
               height: 8,
-              decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+              decoration:
+                  BoxDecoration(color: dotColor, shape: BoxShape.circle),
             ),
           const SizedBox(width: AppSpacing.sm),
         ],
@@ -187,7 +471,8 @@ class _PulsingDot extends StatefulWidget {
   State<_PulsingDot> createState() => _PulsingDotState();
 }
 
-class _PulsingDotState extends State<_PulsingDot> with SingleTickerProviderStateMixin {
+class _PulsingDotState extends State<_PulsingDot>
+    with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
   late Animation<double> _anim;
 
@@ -195,45 +480,165 @@ class _PulsingDotState extends State<_PulsingDot> with SingleTickerProviderState
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 900),
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
     _anim = Tween<double>(begin: 0.4, end: 1.0).animate(_ctrl);
   }
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => FadeTransition(
         opacity: _anim,
         child: Container(
-          width: 8, height: 8,
-          decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
+          width: 8,
+          height: 8,
+          decoration:
+              BoxDecoration(color: widget.color, shape: BoxShape.circle),
         ),
       );
 }
 
-class _CurrentClassCard extends StatelessWidget {
-  final TimetableModel entry;
-  final WidgetRef ref;
-  final bool isDark;
+// ─────────────────────────────────────────────────────────────────────────────
+//  Today Header
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const _CurrentClassCard({required this.entry, required this.ref, required this.isDark});
+class _TodayHeader extends StatelessWidget {
+  final String dayName;
+  final int totalClasses;
+  final int upcomingCount;
+  final bool isDark;
+  final Color primary;
+  final Color onSurface;
+  final Color onSurfaceVariant;
+
+  const _TodayHeader({
+    required this.dayName,
+    required this.totalClasses,
+    required this.upcomingCount,
+    required this.isDark,
+    required this.primary,
+    required this.onSurface,
+    required this.onSurfaceVariant,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Today',
+          style: AppTextStyles.headlineLg.copyWith(color: onSurface),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          '$dayName  ·  $upcomingCount class${upcomingCount == 1 ? '' : 'es'} remaining',
+          style: AppTextStyles.bodyLg.copyWith(color: onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Action Button (Edit / Mark Absent)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isDark;
+  final bool isDestructive;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.isDark,
+    this.isDestructive = false,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
-    final cardBg = isDark ? AppColors.darkSurfaceContainer : Colors.white;
-    final borderColor = isDark ? AppColors.darkOutlineVariant : AppColors.outlineVariant;
-    final onSurfaceVariant = isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
-    final primaryFixed = isDark ? AppColors.darkPrimaryContainer.withAlpha(80) : AppColors.primaryFixed;
+    final color = isDestructive ? AppColors.warning : primary;
+    final surface =
+        isDark ? AppColors.darkSurfaceContainer : AppColors.surfaceContainerLowest;
+
+    return Material(
+      color: surface,
+      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+              vertical: AppSpacing.md, horizontal: AppSpacing.sm),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            border: Border.all(
+                color: color.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: AppTextStyles.labelMd.copyWith(
+                    color: color, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Current Class Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CurrentClassCard extends StatelessWidget {
+  final ClassSession session;
+  final bool isDark;
+
+  const _CurrentClassCard({required this.session, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
+    final cardBg =
+        isDark ? AppColors.darkSurfaceContainer : Colors.white;
+    final onSurfaceVariant =
+        isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
+    final primaryFixed =
+        isDark ? AppColors.darkPrimaryContainer.withAlpha(80) : AppColors.primaryFixed;
+
+    // Calculate progress
+    final now = DateTime.now();
+    final startMin = _parseTimeMin(session.displayStartTime);
+    final endMin = _parseTimeMin(session.displayEndTime);
+    final nowMin = now.hour * 60 + now.minute;
+    final duration = endMin - startMin;
+    final elapsed = nowMin - startMin;
+    final progress = duration > 0 ? (elapsed / duration).clamp(0.0, 1.0) : 0.0;
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: cardBg,
         borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-        border: Border.all(color: borderColor),
+        border: Border.all(color: primary.withValues(alpha: 0.3), width: 1.5),
         boxShadow: [
           BoxShadow(
             color: primary.withAlpha(38),
@@ -243,25 +648,41 @@ class _CurrentClassCard extends StatelessWidget {
         ],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(entry.subjectName,
-                        style: AppTextStyles.headlineMd.copyWith(color: primary)),
+                    Text(session.displaySubjectName,
+                        style: AppTextStyles.headlineMd
+                            .copyWith(color: primary)),
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        Icon(Icons.location_on_outlined, size: 16, color: onSurfaceVariant),
+                        Icon(Icons.schedule_outlined,
+                            size: 14, color: onSurfaceVariant),
                         const SizedBox(width: 4),
                         Text(
-                          '${entry.room ?? 'Room TBD'} • ${entry.startTime} - ${entry.endTime}',
-                          style: AppTextStyles.bodySm.copyWith(color: onSurfaceVariant),
+                          '${session.displayStartTime} – ${session.displayEndTime}',
+                          style: AppTextStyles.bodySm
+                              .copyWith(color: onSurfaceVariant),
                         ),
+                        if (session.room != null) ...[
+                          Text(' · ',
+                              style: AppTextStyles.bodySm
+                                  .copyWith(color: onSurfaceVariant)),
+                          Icon(Icons.location_on_outlined,
+                              size: 14, color: onSurfaceVariant),
+                          const SizedBox(width: 2),
+                          Text(
+                            session.room!,
+                            style: AppTextStyles.bodySm
+                                .copyWith(color: onSurfaceVariant),
+                          ),
+                        ],
                       ],
                     ),
                   ],
@@ -269,76 +690,246 @@ class _CurrentClassCard extends StatelessWidget {
               ),
               Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm, vertical: 4),
+                    horizontal: AppSpacing.sm, vertical: 4),
                 decoration: BoxDecoration(
                   color: primaryFixed,
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
+                  borderRadius:
+                      BorderRadius.circular(AppSpacing.radiusFull),
                 ),
-                child: Text(
-                  'In Progress',
-                  style: AppTextStyles.labelMd.copyWith(color: primary),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _PulsingDot(color: primary),
+                    const SizedBox(width: 4),
+                    Text(
+                      'In Progress',
+                      style: AppTextStyles.labelMd.copyWith(color: primary),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
+          // Progress bar
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
-              value: 0.65,
-              backgroundColor: isDark ? AppColors.darkSurfaceContainerHigh : AppColors.surfaceContainerHigh,
+              value: progress,
+              backgroundColor: isDark
+                  ? AppColors.darkSurfaceContainerHigh
+                  : AppColors.surfaceContainerHigh,
               color: primary,
-              minHeight: 8,
+              minHeight: 6,
             ),
           ),
-          const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.xs),
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: () => ref.read(timetableNotifierProvider.notifier).markAttendance(
-                    subjectId: entry.subjectId,
-                    status: AttendanceStatus.present,
-                  ),
-                  icon: const Icon(Icons.check_circle_outline, size: 18),
-                  label: const Text('Mark Present'),
-                  style: FilledButton.styleFrom(backgroundColor: primary),
-                ),
+              Text(
+                session.displayStartTime,
+                style: AppTextStyles.bodySm
+                    .copyWith(color: onSurfaceVariant, fontSize: 10),
               ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => ref.read(timetableNotifierProvider.notifier).markAttendance(
-                    subjectId: entry.subjectId,
-                    status: AttendanceStatus.absent,
-                  ),
-                  icon: const Icon(Icons.cancel_outlined, size: 18),
-                  label: const Text('Mark Absent'),
-                ),
+              Text(
+                '${(progress * 100).toStringAsFixed(0)}% through',
+                style: AppTextStyles.bodySm
+                    .copyWith(color: onSurfaceVariant, fontSize: 10),
+              ),
+              Text(
+                session.displayEndTime,
+                style: AppTextStyles.bodySm
+                    .copyWith(color: onSurfaceVariant, fontSize: 10),
               ),
             ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          // Info note
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.sm),
+            decoration: BoxDecoration(
+              color: primaryFixed.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 14, color: primary),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: Text(
+                    'Attendance can be marked after class ends',
+                    style: AppTextStyles.bodySm.copyWith(color: primary),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
+
+  int _parseTimeMin(String t) {
+    final parts = t.split(':');
+    return int.parse(parts[0]) * 60 + int.parse(parts[1]);
+  }
 }
 
-class _NextClassCard extends StatelessWidget {
-  final TimetableModel entry;
-  final WidgetRef ref;
-  final bool isDark;
+// ─────────────────────────────────────────────────────────────────────────────
+//  Action Required Card (ended, unmarked → show Present/Absent buttons)
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const _NextClassCard({required this.entry, required this.ref, required this.isDark});
+class _ActionRequiredCard extends StatefulWidget {
+  final ClassSession session;
+  final bool isDark;
+  final Future<void> Function(AttendanceStatus status) onMark;
+
+  const _ActionRequiredCard({
+    required this.session,
+    required this.isDark,
+    required this.onMark,
+  });
+
+  @override
+  State<_ActionRequiredCard> createState() => _ActionRequiredCardState();
+}
+
+class _ActionRequiredCardState extends State<_ActionRequiredCard> {
+  bool _isLoading = false;
 
   @override
   Widget build(BuildContext context) {
-    final cardBg = isDark ? AppColors.darkSurfaceContainer : AppColors.surfaceContainerLowest;
-    final borderColor = isDark ? AppColors.darkOutlineVariant : AppColors.outlineVariant;
-    final onSurface = isDark ? AppColors.darkOnSurface : AppColors.onSurface;
-    final onSurfaceVariant = isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
-    final secondaryContainer = isDark ? AppColors.onSecondaryFixedVariant : AppColors.secondaryContainer;
-    final onSecondary = isDark ? AppColors.secondaryFixed : AppColors.onSecondaryContainer;
+    final cardBg = widget.isDark
+        ? AppColors.darkSurfaceContainer
+        : AppColors.surfaceContainerLowest;
+    final onSurface =
+        widget.isDark ? AppColors.darkOnSurface : AppColors.onSurface;
+    final onSurfaceVariant = widget.isDark
+        ? AppColors.darkOnSurfaceVariant
+        : AppColors.onSurfaceVariant;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        border: Border.all(
+            color: AppColors.warning.withValues(alpha: 0.4), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.session.displaySubjectName,
+                      style: AppTextStyles.bodyLg.copyWith(
+                          color: onSurface, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${widget.session.displayStartTime} – ${widget.session.displayEndTime}',
+                      style: AppTextStyles.bodySm
+                          .copyWith(color: onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.warning.withValues(alpha: 0.12),
+                  borderRadius:
+                      BorderRadius.circular(AppSpacing.radiusFull),
+                ),
+                child: Text(
+                  'Ended',
+                  style: AppTextStyles.labelMd
+                      .copyWith(color: AppColors.warning),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (_isLoading)
+            const Center(
+                child: SizedBox(
+                    height: 32,
+                    width: 32,
+                    child: CircularProgressIndicator(strokeWidth: 2.5)))
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => _mark(AttendanceStatus.present),
+                    icon: const Icon(Icons.check_circle_outline, size: 18),
+                    label: const Text('Present'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.success,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _mark(AttendanceStatus.absent),
+                    icon: const Icon(Icons.cancel_outlined, size: 18),
+                    label: const Text('Absent'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.error,
+                      side: const BorderSide(color: AppColors.error),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _mark(AttendanceStatus status) async {
+    setState(() => _isLoading = true);
+    await widget.onMark(status);
+    if (mounted) setState(() => _isLoading = false);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Upcoming Class Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _UpcomingClassCard extends StatelessWidget {
+  final ClassSession session;
+  final bool isDark;
+
+  const _UpcomingClassCard({required this.session, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final cardBg = isDark
+        ? AppColors.darkSurfaceContainer
+        : AppColors.surfaceContainerLowest;
+    final borderColor =
+        isDark ? AppColors.darkOutlineVariant : AppColors.outlineVariant;
+    final onSurface =
+        isDark ? AppColors.darkOnSurface : AppColors.onSurface;
+    final onSurfaceVariant =
+        isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
+    final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
+
+    final now = DateTime.now();
+    final nowMin = now.hour * 60 + now.minute;
+    final startMin = _parseTimeMin(session.displayStartTime);
+    final diffMin = startMin - nowMin;
+    final timeLabel = _formatTimeUntil(diffMin);
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -347,127 +938,160 @@ class _NextClassCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
         border: Border.all(color: borderColor),
       ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(entry.subjectName,
-                        style: AppTextStyles.headlineMd.copyWith(color: onSurface)),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Icon(Icons.schedule_outlined, size: 16, color: onSurfaceVariant),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${entry.startTime} - ${entry.endTime} • ${entry.room ?? 'Room TBD'}',
-                          style: AppTextStyles.bodySm.copyWith(color: onSurfaceVariant),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
-                decoration: BoxDecoration(
-                  color: secondaryContainer,
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
-                ),
-                child: Text('Up Next', style: AppTextStyles.labelMd.copyWith(color: onSecondary)),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => ref.read(timetableNotifierProvider.notifier).markAttendance(
-                    subjectId: entry.subjectId,
-                    status: AttendanceStatus.present,
-                  ),
-                  child: const Text('Mark Present'),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => ref.read(timetableNotifierProvider.notifier).markAttendance(
-                    subjectId: entry.subjectId,
-                    status: AttendanceStatus.absent,
-                  ),
-                  child: const Text('Mark Absent'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RemainingClassCard extends StatelessWidget {
-  final TimetableModel entry;
-  final WidgetRef ref;
-  final bool isDark;
-
-  const _RemainingClassCard({required this.entry, required this.ref, required this.isDark});
-
-  @override
-  Widget build(BuildContext context) {
-    final borderColor = isDark ? AppColors.darkOutlineVariant : AppColors.outlineVariant;
-    final onSurface = isDark ? AppColors.darkOnSurface : AppColors.onSurface;
-    final onSurfaceVariant = isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
-    final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-        border: Border.all(color: borderColor, style: BorderStyle.solid),
-      ),
       child: Row(
         children: [
-          Expanded(
+          // Time column
+          SizedBox(
+            width: 52,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(entry.subjectName,
-                    style: AppTextStyles.bodyLg.copyWith(
-                      color: onSurface, fontWeight: FontWeight.w600)),
                 Text(
-                  '${entry.startTime} - ${entry.endTime} • ${entry.room ?? 'TBD'}',
-                  style: AppTextStyles.bodySm.copyWith(color: onSurfaceVariant),
+                  session.displayStartTime,
+                  style: AppTextStyles.labelMd.copyWith(
+                      color: onSurface, fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  session.displayEndTime,
+                  style: AppTextStyles.bodySm
+                      .copyWith(color: onSurfaceVariant),
                 ),
               ],
             ),
           ),
-          Row(
-            children: [
-              _CircleIconBtn(
-                icon: Icons.check,
-                color: primary,
-                bg: isDark ? AppColors.darkPrimaryContainer.withAlpha(80) : AppColors.primaryFixed,
-                onTap: () => ref.read(timetableNotifierProvider.notifier).markAttendance(
-                  subjectId: entry.subjectId, status: AttendanceStatus.present,
+          Container(
+            width: 1,
+            height: 40,
+            color: borderColor,
+            margin:
+                const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  session.displaySubjectName,
+                  style: AppTextStyles.bodyLg.copyWith(
+                      color: onSurface, fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              _CircleIconBtn(
-                icon: Icons.close,
-                color: AppColors.error,
-                bg: AppColors.errorContainer,
-                onTap: () => ref.read(timetableNotifierProvider.notifier).markAttendance(
-                  subjectId: entry.subjectId, status: AttendanceStatus.absent,
-                ),
-              ),
-            ],
+                if (session.room != null)
+                  Text(
+                    session.room!,
+                    style: AppTextStyles.bodySm
+                        .copyWith(color: onSurfaceVariant),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm, vertical: 4),
+            decoration: BoxDecoration(
+              color: primary.withValues(alpha: 0.1),
+              borderRadius:
+                  BorderRadius.circular(AppSpacing.radiusFull),
+            ),
+            child: Text(
+              timeLabel,
+              style: AppTextStyles.bodySm
+                  .copyWith(color: primary, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  int _parseTimeMin(String t) {
+    final parts = t.split(':');
+    return int.parse(parts[0]) * 60 + int.parse(parts[1]);
+  }
+
+  String _formatTimeUntil(int minutes) {
+    if (minutes <= 0) return 'Starting';
+    if (minutes < 60) return 'In ${minutes}m';
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    if (m == 0) return 'In ${h}h';
+    return 'In ${h}h ${m}m';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Completed Class Tile
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CompletedClassTile extends StatelessWidget {
+  final ClassSession session;
+  final bool isDark;
+
+  const _CompletedClassTile({required this.session, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final cardBg = isDark
+        ? AppColors.darkSurfaceContainer
+        : AppColors.surfaceContainerLowest;
+    final onSurface =
+        isDark ? AppColors.darkOnSurface : AppColors.onSurface;
+    final onSurfaceVariant =
+        isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
+
+    final (icon, color, statusLabel) = switch (session.status) {
+      AttendanceStatus.present => (
+          Icons.check_circle_rounded,
+          AppColors.success,
+          'Present'
+        ),
+      AttendanceStatus.late => (
+          Icons.timelapse_rounded,
+          AppColors.warning,
+          'Late'
+        ),
+      AttendanceStatus.absent => (
+          Icons.cancel_rounded,
+          AppColors.error,
+          'Absent'
+        ),
+      AttendanceStatus.cancelled || _ => (
+          Icons.block_rounded,
+          onSurfaceVariant,
+          session.isCancelled ? 'Cancelled' : 'Cancelled'
+        ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              session.displaySubjectName,
+              style: AppTextStyles.bodyLg.copyWith(
+                  color: onSurface, fontWeight: FontWeight.w500),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Text(
+            '${session.displayStartTime} – ${session.displayEndTime}',
+            style:
+                AppTextStyles.bodySm.copyWith(color: onSurfaceVariant),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Text(
+            statusLabel,
+            style: AppTextStyles.labelMd.copyWith(color: color),
           ),
         ],
       ),
@@ -475,80 +1099,31 @@ class _RemainingClassCard extends StatelessWidget {
   }
 }
 
-class _CircleIconBtn extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final Color bg;
-  final VoidCallback onTap;
+// ─────────────────────────────────────────────────────────────────────────────
+//  Empty Schedule State
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const _CircleIconBtn({
-    required this.icon,
-    required this.color,
-    required this.bg,
-    required this.onTap,
+class _EmptySchedule extends StatelessWidget {
+  final bool isDark;
+  final Color primary;
+  final Color onSurface;
+  final Color onSurfaceVariant;
+
+  const _EmptySchedule({
+    required this.isDark,
+    required this.primary,
+    required this.onSurface,
+    required this.onSurfaceVariant,
   });
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 40, height: 40,
-          decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
-          child: Icon(icon, color: color, size: 20),
-        ),
-      );
-}
-
-class _AIPredictionBento extends StatelessWidget {
-  final bool isDark;
-  const _AIPredictionBento({required this.isDark});
-
-  @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: AppColors.tertiaryFixed,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusLg * 1.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'AI PREDICTION',
-            style: AppTextStyles.labelCaps.copyWith(
-              color: AppColors.onTertiaryFixed.withAlpha(180),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'High Attendance Likelihood',
-            style: AppTextStyles.headlineMd.copyWith(
-              color: AppColors.onTertiaryFixed,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Based on your past weeks, you are 92% likely to attend all sessions today.',
-            style: AppTextStyles.bodySm.copyWith(
-              color: AppColors.onTertiaryFixed.withAlpha(220),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          OutlinedButton.icon(
-            onPressed: () {},
-            icon: const Icon(Icons.arrow_forward, size: 16),
-            label: const Text('View Analytics'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.onTertiaryFixed,
-              side: BorderSide(color: AppColors.onTertiaryFixed.withAlpha(100)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
-              ),
-            ),
-          ),
-        ],
-      ),
+    return EmptyStateWidget(
+      icon: Icons.free_breakfast_outlined,
+      title: 'No classes today',
+      subtitle: 'Import your timetable to get started!',
+      actionLabel: 'Import Timetable',
+      onAction: () => context.push('/timetable/upload'),
     );
   }
 }
