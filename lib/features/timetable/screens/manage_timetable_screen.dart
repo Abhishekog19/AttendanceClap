@@ -39,14 +39,16 @@ class ManageTimetableScreen extends ConsumerWidget {
           'Manage Timetable',
           style: AppTextStyles.headlineMd.copyWith(color: onSurface),
         ),
-        actions: [
-          // Import via OCR
-          IconButton(
-            icon: const Icon(Icons.document_scanner_outlined),
-            tooltip: 'Import via OCR',
-            onPressed: () => context.push('/timetable/upload'),
-          ),
-        ],
+        actions: const [],
+        // OCR import button — disabled until OCR feature is ready
+        // actions: [
+        //   // Import via OCR
+        //   IconButton(
+        //     icon: const Icon(Icons.document_scanner_outlined),
+        //     tooltip: 'Import via OCR',
+        //     onPressed: () => context.push('/timetable/upload'),
+        //   ),
+        // ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
@@ -69,7 +71,8 @@ class ManageTimetableScreen extends ConsumerWidget {
             return _EmptyBody(
               primary: primary,
               onAddManual: () => context.push('/timetable/manual-entry'),
-              onImport: () => context.push('/timetable/upload'),
+              // OCR import — disabled until OCR feature is ready
+              // onImport: () => context.push('/timetable/upload'),
             );
           }
           return _GroupedEntryList(
@@ -474,12 +477,13 @@ class _DeleteDialogState extends State<_DeleteDialog> {
 class _EmptyBody extends StatelessWidget {
   final Color primary;
   final VoidCallback onAddManual;
-  final VoidCallback onImport;
+  // OCR import callback — disabled until OCR feature is ready
+  // final VoidCallback onImport;
 
   const _EmptyBody({
     required this.primary,
     required this.onAddManual,
-    required this.onImport,
+    // required this.onImport,
   });
 
   @override
@@ -504,7 +508,7 @@ class _EmptyBody extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Add classes manually or import your timetable\nfrom a photo or PDF.',
+              'Add your classes manually to get started.',
               style: AppTextStyles.bodyLg
                   .copyWith(color: onSurfaceVariant, height: 1.5),
               textAlign: TextAlign.center,
@@ -527,25 +531,26 @@ class _EmptyBody extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: AppSpacing.md),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onImport,
-                icon: const Icon(Icons.document_scanner_outlined),
-                label: const Text('Import from Photo / PDF'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: primary,
-                  side: BorderSide(color: primary),
-                  padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.md),
-                  shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(AppSpacing.radiusMd),
-                  ),
-                ),
-              ),
-            ),
+            // OCR import button — disabled until OCR feature is ready
+            // const SizedBox(height: AppSpacing.md),
+            // SizedBox(
+            //   width: double.infinity,
+            //   child: OutlinedButton.icon(
+            //     onPressed: onImport,
+            //     icon: const Icon(Icons.document_scanner_outlined),
+            //     label: const Text('Import from Photo / PDF'),
+            //     style: OutlinedButton.styleFrom(
+            //       foregroundColor: primary,
+            //       side: BorderSide(color: primary),
+            //       padding: const EdgeInsets.symmetric(
+            //           vertical: AppSpacing.md),
+            //       shape: RoundedRectangleBorder(
+            //         borderRadius:
+            //             BorderRadius.circular(AppSpacing.radiusMd),
+            //       ),
+            //     ),
+            //   ),
+            // ),
           ],
         ),
       ),

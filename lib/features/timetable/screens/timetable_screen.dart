@@ -9,9 +9,24 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../data/models/class_session_model.dart';
+import '../../../data/repositories/timetable_repository.dart';
 import '../../../shared/widgets/empty_state_widget.dart';
 import '../providers/timetable_provider.dart';
 import 'edit_today_schedule_sheet.dart';
+
+// ── Lightweight one-shot providers (no codegen needed) ────────────────────────
+
+/// True if the user has ANY rows in timetable_entries.
+final _hasTimetableEntriesProvider = FutureProvider.autoDispose<bool>(
+  (ref) => ref.read(timetableRepositoryProvider).hasActiveTimetable(),
+);
+
+/// True if the user has ever saved a semester (generated a schedule at least once).
+final _hasActiveSemesterProvider = FutureProvider.autoDispose<bool>((ref) async {
+  final semester =
+      await ref.read(timetableRepositoryProvider).getActiveSemester();
+  return semester != null;
+});
 
 class TimetableScreen extends ConsumerStatefulWidget {
   const TimetableScreen({super.key});
@@ -1103,7 +1118,7 @@ class _CompletedClassTile extends StatelessWidget {
 //  Empty Schedule State
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _EmptySchedule extends StatelessWidget {
+class _EmptySchedule extends ConsumerWidget {
   final bool isDark;
   final Color primary;
   final Color onSurface;
@@ -1117,13 +1132,209 @@ class _EmptySchedule extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasEntries =
+        ref.watch(_hasTimetableEntriesProvider).valueOrNull ?? false;
+    final hasSemester =
+        ref.watch(_hasActiveSemesterProvider).valueOrNull ?? false;
+
+    // ── State 1: No timetable at all ─────────────────────────────────────
+    if (!hasEntries) {
+      return EmptyStateWidget(
+        icon: Icons.table_chart_outlined,
+        title: 'No timetable yet',
+        subtitle:
+            'Scan your timetable image, enter a share code, or build it manually.',
+        actionLabel: 'Set Up Timetable',
+        onAction: () => context.push('/timetable/upload'),
+      );
+    }
+
+    // ── State 2: Entries exist but semester was never generated ──────────
+    if (!hasSemester) {
+      return _SetupSemesterPrompt(
+        primary: primary,
+        onSurface: onSurface,
+        onSurfaceVariant: onSurfaceVariant,
+        isDark: isDark,
+      );
+    }
+
+    // ── State 3: Semester exists but today is a rest day ─────────────────
     return EmptyStateWidget(
-      icon: Icons.free_breakfast_outlined,
-      title: 'No classes today',
-      subtitle: 'Import your timetable to get started!',
-      actionLabel: 'Import Timetable',
-      onAction: () => context.push('/timetable/upload'),
+      icon: Icons.weekend_outlined,
+      title: 'No classes today 🎉',
+      subtitle: 'Enjoy your free day! Your next class is on a weekday.',
+      actionLabel: 'View Full Timetable',
+      onAction: () => context.push('/timetable/manage'),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Semester setup prompt (timetable saved, semester missing)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SetupSemesterPrompt extends StatelessWidget {
+  final Color primary;
+  final Color onSurface;
+  final Color onSurfaceVariant;
+  final bool isDark;
+
+  const _SetupSemesterPrompt({
+    required this.primary,
+    required this.onSurface,
+    required this.onSurfaceVariant,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final surface = isDark
+        ? AppColors.darkSurfaceContainer
+        : AppColors.surfaceContainerLowest;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ✅ icon
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_circle_outline_rounded,
+                  color: Colors.green, size: 44),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+
+            Text(
+              'Timetable Saved!',
+              style: AppTextStyles.headlineMd.copyWith(
+                  color: onSurface, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Your classes are saved. Now set your semester dates so we can '  
+              'generate daily sessions and show your schedule here.',
+              style:
+                  AppTextStyles.bodyLg.copyWith(color: onSurfaceVariant, height: 1.5),
+              textAlign: TextAlign.center,
+            ),
+
+            const SizedBox(height: AppSpacing.xl),
+
+            // Step indicator
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: surface,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+              ),
+              child: Column(
+                children: [
+                  _Step(
+                      number: 1,
+                      label: 'Build timetable',
+                      done: true,
+                      primary: Colors.green),
+                  const SizedBox(height: AppSpacing.sm),
+                  _Step(
+                      number: 2,
+                      label: 'Set semester dates & generate schedule',
+                      done: false,
+                      primary: primary),
+                  const SizedBox(height: AppSpacing.sm),
+                  _Step(
+                      number: 3,
+                      label: 'Track attendance daily',
+                      done: false,
+                      primary: onSurfaceVariant),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: AppSpacing.xl),
+
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => context.push('/timetable/semester-setup'),
+                icon: const Icon(Icons.rocket_launch_outlined),
+                label: const Text('Set Up Semester Now'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: primary,
+                  padding:
+                      const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                  shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusMd),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Step extends StatelessWidget {
+  final int number;
+  final String label;
+  final bool done;
+  final Color primary;
+
+  const _Step({
+    required this.number,
+    required this.label,
+    required this.done,
+    required this.primary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: primary.withValues(alpha: done ? 1.0 : 0.12),
+            shape: BoxShape.circle,
+          ),
+          child: done
+              ? const Icon(Icons.check, color: Colors.white, size: 16)
+              : Center(
+                  child: Text(
+                    '$number',
+                    style: TextStyle(
+                        color: primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: primary,
+              fontSize: 13,
+              fontWeight: done ? FontWeight.w600 : FontWeight.normal,
+              decoration: done ? TextDecoration.lineThrough : null,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

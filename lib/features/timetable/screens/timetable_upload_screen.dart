@@ -12,6 +12,7 @@ import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../data/repositories/timetable_repository.dart';
 import '../providers/timetable_ocr_provider.dart';
+import '../services/timetable_share_service.dart';
 
 part 'timetable_upload_screen.g.dart';
 
@@ -132,6 +133,8 @@ class _TimetableUploadScreenState
           onCamera: _pickFromCamera,
           onGallery: _pickFromGallery,
           onPdf: _pickPdf,
+          onCode: _showCodeEntry,
+          onBuild: () => context.push('/timetable/builder'),
           onRetry: () => ref.read(timetableOcrProvider.notifier).retry(),
         ),
         data: (hasActive) {
@@ -167,6 +170,8 @@ class _TimetableUploadScreenState
             onCamera: _pickFromCamera,
             onGallery: _pickFromGallery,
             onPdf: _pickPdf,
+            onCode: _showCodeEntry,
+            onBuild: () => context.push('/timetable/builder'),
             onRetry: () => ref.read(timetableOcrProvider.notifier).retry(),
           );
         },
@@ -268,6 +273,41 @@ class _TimetableUploadScreenState
     }
   }
 
+  Future<void> _showCodeEntry() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CodeEntryDialog(
+        onCode: (code) async {
+          try {
+            final result = await TimetableShareService.instance.fetch(code);
+            if (!mounted) return;
+            // Inject the fetched schedule into the OCR provider (reuse review flow)
+            ref.read(timetableOcrProvider.notifier)
+                .loadSharedSchedule(result.schedule);
+            if (mounted) context.push('/timetable/review');
+          } on ShareCodeException catch (e) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(e.message),
+                backgroundColor: AppColors.error,
+              ),
+            );
+          } catch (_) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Could not fetch timetable. Check your connection.'),
+              ),
+            );
+          }
+        },
+      ),
+    );
+  }
+
   Future<void> _pickPdf() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -283,7 +323,154 @@ class _TimetableUploadScreenState
   }
 }
 
-// ── Locked State View ─────────────────────────────────────────────────────────
+// ── Code Entry Dialog ─────────────────────────────────────────────
+
+class _CodeEntryDialog extends StatefulWidget {
+  final Future<void> Function(String code) onCode;
+  const _CodeEntryDialog({required this.onCode});
+  @override
+  State<_CodeEntryDialog> createState() => _CodeEntryDialogState();
+}
+
+class _CodeEntryDialogState extends State<_CodeEntryDialog> {
+  final _ctrl = TextEditingController();
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final code = _ctrl.text.trim().toUpperCase();
+    if (code.length != 6) {
+      setState(() => _error = 'Please enter the full 6-character code.');
+      return;
+    }
+    setState(() { _loading = true; _error = null; });
+    try {
+      await widget.onCode(code);
+      if (mounted) Navigator.pop(context);
+    } on ShareCodeException catch (e) {
+      if (mounted) setState(() { _loading = false; _error = e.message; });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Could not load timetable. Check your connection.';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? AppColors.darkSurfaceContainer : AppColors.surface;
+    final onSurface = isDark ? AppColors.darkOnSurface : AppColors.onSurface;
+    final onVariant = isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        margin: const EdgeInsets.all(AppSpacing.md),
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.teal.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                  ),
+                  child: const Icon(Icons.qr_code_2_rounded,
+                      color: Colors.teal, size: 24),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Enter Share Code',
+                          style: AppTextStyles.headlineMd
+                              .copyWith(color: onSurface)),
+                      Text('6-character code from a batchmate',
+                          style: AppTextStyles.bodySm
+                              .copyWith(color: onVariant)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            TextField(
+              controller: _ctrl,
+              autofocus: true,
+              textCapitalization: TextCapitalization.characters,
+              maxLength: 6,
+              style: AppTextStyles.headlineLg.copyWith(
+                color: onSurface,
+                letterSpacing: 8,
+              ),
+              textAlign: TextAlign.center,
+              decoration: InputDecoration(
+                hintText: 'XXXXXX',
+                hintStyle: AppTextStyles.headlineLg.copyWith(
+                  color: onVariant.withValues(alpha: 0.4),
+                  letterSpacing: 8,
+                ),
+                counterText: '',
+                errorText: _error,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                ),
+              ),
+              onChanged: (_) => setState(() => _error = null),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _loading ? null : _submit,
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.teal,
+                  padding:
+                      const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                  shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusMd),
+                  ),
+                ),
+                child: _loading
+                    ? const SizedBox(
+                        width: 20, height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Load Timetable'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 
 class _ActiveTimetableLockedView extends StatelessWidget {
   final bool isDark;
@@ -390,6 +577,8 @@ class _UploadBody extends StatelessWidget {
   final VoidCallback onCamera;
   final VoidCallback onGallery;
   final VoidCallback onPdf;
+  final VoidCallback onCode;
+  final VoidCallback onBuild;
   final VoidCallback onRetry;
 
   const _UploadBody({
@@ -403,6 +592,8 @@ class _UploadBody extends StatelessWidget {
     required this.onCamera,
     required this.onGallery,
     required this.onPdf,
+    required this.onCode,
+    required this.onBuild,
     required this.onRetry,
   });
 
@@ -422,13 +613,81 @@ class _UploadBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+
+          // ── ⚡ Share Code Hero banner (TOP) ──────────────────────────
+          GestureDetector(
+            onTap: onCode,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF009688), Color(0xFF26A69A)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.teal.withValues(alpha: 0.35),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      borderRadius:
+                          BorderRadius.circular(AppSpacing.radiusMd),
+                    ),
+                    child: const Icon(Icons.bolt_rounded,
+                        color: Colors.white, size: 30),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Got a code from your CR?',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Enter 6-char share code → load timetable instantly',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward_ios,
+                      color: Colors.white, size: 16),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.xl),
+
           // ── Hero illustration ──────────────────────────────────────
           Center(
             child: ScaleTransition(
               scale: pulse,
               child: Container(
-                width: 140,
-                height: 140,
+                width: 120,
+                height: 120,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
@@ -446,25 +705,23 @@ class _UploadBody extends StatelessWidget {
                 ),
                 child: Icon(
                   Icons.document_scanner_outlined,
-                  size: 64,
+                  size: 54,
                   color: primary,
                 ),
               ),
             ),
           ),
 
-          const SizedBox(height: AppSpacing.xl),
+          const SizedBox(height: AppSpacing.lg),
 
           Text(
             'Scan Your Timetable',
             style: AppTextStyles.headlineLg.copyWith(color: onSurface),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.xs),
           Text(
-            'Upload a photo, screenshot, or PDF of your class '
-            'timetable. Our AI will extract all subjects, timings, '
-            'and faculty automatically.',
+            'Upload a photo, screenshot, or PDF — AI extracts everything.',
             style: AppTextStyles.bodyLg.copyWith(
               color: onSurfaceVariant,
               height: 1.5,
@@ -472,11 +729,11 @@ class _UploadBody extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
 
-          const SizedBox(height: AppSpacing.xxl),
+          const SizedBox(height: AppSpacing.xl),
 
           // ── Upload options ─────────────────────────────────────────
           Text(
-            'CHOOSE SOURCE',
+            'SCAN OPTIONS',
             style: AppTextStyles.labelCaps.copyWith(
               color: onSurfaceVariant,
             ),
@@ -519,6 +776,35 @@ class _UploadBody extends StatelessWidget {
               onRetry: ocrState.retryable ? onRetry : null,
             ),
           ],
+
+          const SizedBox(height: AppSpacing.xl),
+
+          // ── OR divider ─────────────────────────────────────────────
+          Row(
+            children: [
+              const Expanded(child: Divider()),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                child: Text(
+                  'OR BUILD MANUALLY',
+                  style: AppTextStyles.labelCaps
+                      .copyWith(color: onSurfaceVariant),
+                ),
+              ),
+              const Expanded(child: Divider()),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+
+          // ── Build Manually ─────────────────────────────────────────
+          _UploadOptionCard(
+            icon: Icons.edit_calendar_outlined,
+            title: 'Build Manually',
+            subtitle: 'Type your classes day by day — no photo needed',
+            badge: 'MANUAL',
+            color: Colors.orange,
+            onTap: onBuild,
+          ),
 
           const SizedBox(height: AppSpacing.xxl),
 
