@@ -107,7 +107,11 @@ class _TimetableBuilderScreenState
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: _kDays.length, vsync: this);
-    BuilderRecentsService.instance.ensureLoaded();
+    // ensureLoaded() must be awaited so SharedPreferences data is available
+    // before _SlotSheet's addPostFrameCallback reads BuilderRecentsService.all.
+    BuilderRecentsService.instance.ensureLoaded().then((_) {
+      if (mounted) setState(() {}); // trigger rebuild if recents affect UI
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _init());
   }
 

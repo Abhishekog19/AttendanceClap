@@ -468,6 +468,8 @@ class TimetableMlService {
   Future<Map<String, List<TimetableEntry>>> _batchedParse(
       String text, String key) async {
     final result = <String, List<TimetableEntry>>{};
+    final failedBatches = <List<String>>[];
+
     for (int i = 0; i < _kAllDays.length; i += _kDaysPerBatch) {
       final batch = _kAllDays.sublist(
           i, math.min(i + _kDaysPerBatch, _kAllDays.length));
@@ -483,11 +485,17 @@ class TimetableMlService {
         result.addAll(partial);
       } catch (e) {
         debugPrint('[Groq] batch error: $e');
+        failedBatches.add(batch);
       }
       if (i + _kDaysPerBatch < _kAllDays.length) {
         await Future.delayed(const Duration(milliseconds: 500));
       }
     }
+
+    if (failedBatches.isNotEmpty) {
+      debugPrint('[Groq] ⚠️ failed batches: $failedBatches');
+    }
+
     for (final d in _kAllDays) {
       result.putIfAbsent(d, () => []);
     }
