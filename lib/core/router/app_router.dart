@@ -10,12 +10,14 @@ import '../../features/dashboard/screens/dashboard_screen.dart';
 import '../../features/subjects/screens/subjects_screen.dart';
 import '../../features/subjects/screens/add_edit_subject_screen.dart';
 import '../../features/timetable/screens/timetable_screen.dart';
-import '../../features/timetable/screens/timetable_upload_screen.dart';
-import '../../features/timetable/screens/timetable_review_screen.dart';
+// OCR feature — disabled until ready
+// import '../../features/timetable/screens/timetable_upload_screen.dart';
+// import '../../features/timetable/screens/timetable_review_screen.dart';
 import '../../features/timetable/screens/semester_setup_screen.dart';
 import '../../features/timetable/screens/schedule_preview_screen.dart';
 import '../../features/timetable/screens/manage_timetable_screen.dart';
 import '../../features/timetable/screens/manual_entry_screen.dart';
+import '../../features/timetable/screens/timetable_builder_screen.dart';
 import '../../features/predictor/screens/predictor_screen.dart';
 import '../../features/analytics/screens/analytics_screen.dart';
 import '../../features/premium/screens/premium_screen.dart';
@@ -134,17 +136,17 @@ GoRouter appRouter(Ref ref) {
         name: 'premium',
         builder: (context, state) => const PremiumScreen(),
       ),
-      // ─── Timetable OCR Routes ─────────────────────────────────────────────────
-      GoRoute(
-        path: '/timetable/upload',
-        name: 'timetableUpload',
-        builder: (context, state) => const TimetableUploadScreen(),
-      ),
-      GoRoute(
-        path: '/timetable/review',
-        name: 'timetableReview',
-        builder: (context, state) => const TimetableReviewScreen(),
-      ),
+      // ─── Timetable OCR Routes — disabled until OCR feature is ready ────────────
+      // GoRoute(
+      //   path: '/timetable/upload',
+      //   name: 'timetableUpload',
+      //   builder: (context, state) => const TimetableUploadScreen(),
+      // ),
+      // GoRoute(
+      //   path: '/timetable/review',
+      //   name: 'timetableReview',
+      //   builder: (context, state) => const TimetableReviewScreen(),
+      // ),
       GoRoute(
         path: '/timetable/semester-setup',
         name: 'semesterSetup',
@@ -168,6 +170,11 @@ GoRouter appRouter(Ref ref) {
           final existing = state.extra as TimetableEntry?;
           return ManualEntryScreen(existing: existing);
         },
+      ),
+      GoRoute(
+        path: '/timetable/builder',
+        name: 'timetableBuilder',
+        builder: (context, state) => const TimetableBuilderScreen(),
       ),
       GoRoute(
         path: '/notifications/settings',

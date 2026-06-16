@@ -274,6 +274,25 @@ class TimetableRepository {
     return sessions.length;
   }
 
+  // ── Delete all class sessions (used before re-generating) ────────────────
+
+  /// Wipes the entire class_sessions collection for this user.
+  /// Call this before calling [saveClassSessions] on a re-generate to
+  /// prevent duplicate sessions.
+  Future<void> deleteAllSessions() async {
+    const batchSize = 500;
+    QuerySnapshot<Map<String, dynamic>> snap;
+    do {
+      snap = await _sessionsCol.limit(batchSize).get();
+      if (snap.docs.isEmpty) break;
+      final batch = _firestore.batch();
+      for (final doc in snap.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    } while (snap.docs.length == batchSize);
+  }
+
   /// Generates sessions for a single entry from [fromDate] to semester end.
   /// Used when manually adding a class to an active semester.
   Future<int> addSessionsForEntry({

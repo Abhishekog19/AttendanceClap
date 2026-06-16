@@ -100,7 +100,7 @@ class SemesterNotifier extends _$SemesterNotifier {
   }
 
   Future<void> generateSchedule({
-    required List<TimetableEntry> entries,
+    List<TimetableEntry> entries = const [],
     required TimetableRepository repo,
   }) async {
     if (!state.isValid) {
@@ -111,20 +111,40 @@ class SemesterNotifier extends _$SemesterNotifier {
     state = state.copyWith(isGenerating: true, error: null, generationProgress: 0.0);
 
     try {
+      // If the caller has no in-memory entries (e.g. navigated here from
+      // the schedule screen, not through the builder), fall back to reading
+      // the timetable_entries collection directly from Firestore.
+      final effectiveEntries = entries.isNotEmpty
+          ? entries
+          : await repo.watchTimetableEntries().first;
+
+      if (effectiveEntries.isEmpty) {
+        state = state.copyWith(
+          isGenerating: false,
+          error: 'No timetable entries found. '
+              'Please build your timetable first.',
+        );
+        return;
+      }
+
       final semester = _buildSemester();
 
       // 1. Save semester config
       await repo.saveSemester(semester);
 
-      // 2. Save timetable entries
-      await repo.saveTimetable(entries);
+      // 2. Save timetable entries (ensures Firestore is consistent)
+      await repo.saveTimetable(effectiveEntries);
 
       // 3. Auto-create subjects
-      final subjectIdMap = await repo.createSubjectsFromTimetable(entries);
+      final subjectIdMap =
+          await repo.createSubjectsFromTimetable(effectiveEntries);
 
-      // 4. Generate and write all sessions
+      // 4. Clear existing sessions first to prevent duplicates on re-runs
+      await repo.deleteAllSessions();
+
+      // 5. Generate and write all sessions
       final count = await repo.saveClassSessions(
-        entries: entries,
+        entries: effectiveEntries,
         semester: semester,
         subjectIdMap: subjectIdMap,
         onProgress: (p) =>

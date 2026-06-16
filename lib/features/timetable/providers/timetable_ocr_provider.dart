@@ -4,6 +4,7 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../data/models/timetable_entry_model.dart';
+import '../services/timetable_gemini_service.dart';
 import '../services/timetable_ml_service.dart';
 
 export '../services/timetable_ml_service.dart' show TimetableOcrException;
@@ -144,9 +145,9 @@ class TimetableOcr extends _$TimetableOcr {
   @override
   OcrState build() => const OcrState();
 
-  final _service = TimetableMlService.instance;
 
   // ── Public entry points ───────────────────────────────────────────────────
+
 
   /// Main entry — auto-detects image vs PDF and processes accordingly.
   Future<void> processFile(File file) async {
@@ -171,6 +172,21 @@ class TimetableOcr extends _$TimetableOcr {
     await processFile(file);
   }
 
+  /// Load a schedule fetched from a share code directly into state.
+  /// Pushes the provider to success so the review screen can open.
+  void loadSharedSchedule(Map<String, List<TimetableEntry>> schedule) {
+    ref.read(editedTimetableProvider.notifier).setAll(schedule);
+    final all = schedule.values.expand((e) => e).toList();
+    state = OcrState(
+      status: OcrStatus.success,
+      schedule: schedule,
+      retryable: false,
+      subjectCount: all.map((e) => e.subject).toSet().length,
+      entryCount: all.length,
+      processingTimeMs: 0,
+    );
+  }
+
   void reset() => state = const OcrState();
 
   // ── Image pipeline ────────────────────────────────────────────────────────
@@ -179,114 +195,33 @@ class TimetableOcr extends _$TimetableOcr {
     final stopwatch = Stopwatch()..start();
 
     // Step 1: Validate
-    state = state.copyWith(
-        status: OcrStatus.validating, errorMessage: null);
-    if (!await file.exists()) {
-      _setError('File not found. Please pick the image again.', retryable: false);
-      return;
-    }
-
-    // Step 2: ML Kit OCR
-    state = state.copyWith(status: OcrStatus.extracting);
-    late String rawText;
-    try {
-      rawText = await _service.extractTextFromImage(file);
-    } on TimetableOcrException catch (e) {
-      await _logCrashlytics(e, StackTrace.current, 'image_ocr_extraction');
-      _setError(e.message, retryable: true);
-      return;
-    } catch (e, st) {
-      await _logCrashlytics(e, st, 'image_ocr_unexpected');
-      _setError(
-          'Text extraction failed. Please try a clearer image.',
-          retryable: true);
-      return;
-    }
-
-    if (rawText.trim().isEmpty) {
-      _setError(
-          'No text found in the image.\n'
-          '• Ensure the timetable is clearly visible\n'
-          '• Try better lighting or a higher resolution',
-          retryable: true);
-      return;
-    }
-
-    // Step 3: Groq AI parsing
-    await _runGroqParsing(rawText, stopwatch);
-  }
-
-  // ── PDF pipeline ──────────────────────────────────────────────────────────
-
-  Future<void> _processPdf(File file) async {
-    final stopwatch = Stopwatch()..start();
-
-    // Validate file existence
     state = state.copyWith(status: OcrStatus.validating, errorMessage: null);
     if (!await file.exists()) {
-      _setError('PDF file not found. Please pick the file again.',
+      _setError('File not found. Please pick the image again.',
           retryable: false);
       return;
     }
 
-    // Convert PDF pages to images, run OCR per page
-    state = state.copyWith(status: OcrStatus.convertingPdf);
-    late String mergedText;
+    // Step 2+3: Gemini Vision → JSON (falls back to ML Kit+Groq if no key)
+    state = state.copyWith(status: OcrStatus.extracting);
+
     try {
-      mergedText = await _service.extractTextFromPdf(
+      final schedule = await TimetableGeminiService.instance.processImage(
         file,
-        onPageProgress: (current, total) {
-          state = state.copyWith(
-            status: OcrStatus.convertingPdf,
-            currentPage: current,
-            totalPages: total,
-          );
+        onGridBuilt: () {
+          state = state.copyWith(status: OcrStatus.parsing);
         },
       );
-    } on TimetableOcrException catch (e) {
-      await _logCrashlytics(e, StackTrace.current, 'pdf_ocr_extraction');
-      _setError(e.message, retryable: true);
-      return;
-    } catch (e, st) {
-      await _logCrashlytics(e, st, 'pdf_ocr_unexpected');
-      _setError(
-          'PDF processing failed. Please try a different file.',
-          retryable: true);
-      return;
-    }
-
-    if (mergedText.trim().isEmpty) {
-      _setError(
-          'No text found in the PDF.\n'
-          '• Ensure the PDF contains a text-based or scanned timetable\n'
-          '• Try uploading as an image instead',
-          retryable: true);
-      return;
-    }
-
-    // Groq AI parsing on the merged text
-    await _runGroqParsing(mergedText, stopwatch);
-  }
-
-  // ── Shared Groq step ──────────────────────────────────────────────────────
-
-  Future<void> _runGroqParsing(String rawText, Stopwatch stopwatch) async {
-    state = state.copyWith(status: OcrStatus.parsing);
-
-    try {
-      final schedule = await _service.parseTextWithGroq(rawText);
 
       final allEntries = schedule.values.expand((e) => e).toList();
       final subjects = allEntries.map((e) => e.subject).toSet();
       final lowConf = allEntries.where((e) => e.isLowConfidence).length;
 
-      // Push to the editable timetable provider
       ref.read(editedTimetableProvider.notifier).setAll(schedule);
 
       state = OcrState(
         status: OcrStatus.success,
         schedule: schedule,
-        rawText: rawText,
         retryable: false,
         lastFile: state.lastFile,
         processingTimeMs: stopwatch.elapsedMilliseconds,
@@ -295,12 +230,66 @@ class TimetableOcr extends _$TimetableOcr {
         lowConfidenceCount: lowConf,
       );
     } on TimetableOcrException catch (e) {
-      await _logCrashlytics(e, StackTrace.current, 'groq_parsing');
+      await _logCrashlytics(e, StackTrace.current, 'image_pipeline');
       _setError(e.message, retryable: true);
     } catch (e, st) {
-      await _logCrashlytics(e, st, 'groq_unexpected');
-      _setError(
-          'AI parsing failed. Please try again or contact support.',
+      await _logCrashlytics(e, st, 'image_pipeline_unexpected');
+      _setError('Processing failed. Please try a clearer image.',
+          retryable: true);
+    }
+  }
+
+  // ── PDF pipeline ──────────────────────────────────────────────────────────
+
+  Future<void> _processPdf(File file) async {
+    final stopwatch = Stopwatch()..start();
+
+    state = state.copyWith(status: OcrStatus.validating, errorMessage: null);
+    if (!await file.exists()) {
+      _setError('PDF file not found. Please pick the file again.',
+          retryable: false);
+      return;
+    }
+
+    state = state.copyWith(status: OcrStatus.convertingPdf);
+
+    try {
+      final schedule = await TimetableGeminiService.instance.processPdf(
+        file,
+        onPageProgress: (current, total) {
+          state = state.copyWith(
+            status: OcrStatus.convertingPdf,
+            currentPage: current,
+            totalPages: total,
+          );
+        },
+        onGridBuilt: () {
+          state = state.copyWith(status: OcrStatus.parsing);
+        },
+      );
+
+      final allEntries = schedule.values.expand((e) => e).toList();
+      final subjects = allEntries.map((e) => e.subject).toSet();
+      final lowConf = allEntries.where((e) => e.isLowConfidence).length;
+
+      ref.read(editedTimetableProvider.notifier).setAll(schedule);
+
+      state = OcrState(
+        status: OcrStatus.success,
+        schedule: schedule,
+        retryable: false,
+        lastFile: state.lastFile,
+        processingTimeMs: stopwatch.elapsedMilliseconds,
+        subjectCount: subjects.length,
+        entryCount: allEntries.length,
+        lowConfidenceCount: lowConf,
+      );
+    } on TimetableOcrException catch (e) {
+      await _logCrashlytics(e, StackTrace.current, 'pdf_pipeline');
+      _setError(e.message, retryable: true);
+    } catch (e, st) {
+      await _logCrashlytics(e, st, 'pdf_pipeline_unexpected');
+      _setError('PDF processing failed. Please try a different file.',
           retryable: true);
     }
   }

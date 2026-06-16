@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,25 +8,130 @@ import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../data/models/timetable_entry_model.dart';
 import '../providers/timetable_ocr_provider.dart';
+import '../services/timetable_share_service.dart';
 
-class TimetableReviewScreen extends ConsumerWidget {
+class TimetableReviewScreen extends ConsumerStatefulWidget {
   const TimetableReviewScreen({super.key});
+  @override
+  ConsumerState<TimetableReviewScreen> createState() =>
+      _TimetableReviewScreenState();
+}
+
+class _TimetableReviewScreenState
+    extends ConsumerState<TimetableReviewScreen> {
+  bool _sharing = false;
 
   static const _days = [
     'Monday', 'Tuesday', 'Wednesday',
     'Thursday', 'Friday', 'Saturday', 'Sunday',
   ];
 
+  Future<void> _share(Map<String, List<TimetableEntry>> schedule) async {
+    setState(() => _sharing = true);
+    try {
+      final code = await TimetableShareService.instance.upload(schedule);
+      if (!mounted) return;
+      _showCodeDialog(code);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not share: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
+  void _showCodeDialog(String code) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? AppColors.darkSurfaceContainer : AppColors.surface;
+    final onSurface = isDark ? AppColors.darkOnSurface : AppColors.onSurface;
+    final onVariant =
+        isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
+
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: bg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        ),
+        title: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.teal),
+            const SizedBox(width: AppSpacing.sm),
+            Text('Timetable Shared!',
+                style: AppTextStyles.headlineMd.copyWith(color: onSurface)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Share this code with your batchmates.',
+              style: AppTextStyles.bodyLg.copyWith(color: onVariant),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                vertical: AppSpacing.lg,
+                horizontal: AppSpacing.xl,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.teal.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                border: Border.all(color: Colors.teal.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                code,
+                style: AppTextStyles.headlineLg.copyWith(
+                  color: Colors.teal,
+                  letterSpacing: 10,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Valid for 30 days',
+              style:
+                  AppTextStyles.bodySm.copyWith(color: onVariant),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: code));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Code copied!')),
+              );
+            },
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('Copy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            style: FilledButton.styleFrom(backgroundColor: Colors.teal),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final schedule = ref.watch(editedTimetableProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
     final bg = isDark ? AppColors.darkSurface : AppColors.background;
     final onSurface = isDark ? AppColors.darkOnSurface : AppColors.onSurface;
 
-    final allEntries =
-        schedule.values.expand((e) => e).toList();
+    final allEntries = schedule.values.expand((e) => e).toList();
     final hasLowConf = allEntries.any((e) => e.isLowConfidence);
     final totalSubjects = allEntries.map((e) => e.subject).toSet().length;
 
@@ -41,9 +147,26 @@ class TimetableReviewScreen extends ConsumerWidget {
         title: Text(
           'Review Timetable',
           style: AppTextStyles.bodyLg.copyWith(
-                        color: onSurface, fontWeight: FontWeight.bold),
+              color: onSurface, fontWeight: FontWeight.bold),
         ),
         actions: [
+          // Share button
+          if (allEntries.isNotEmpty)
+            _sharing
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2),
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.share_outlined),
+                    tooltip: 'Share timetable code',
+                    onPressed: () => _share(schedule),
+                  ),
           TextButton.icon(
             onPressed: allEntries.isEmpty
                 ? null
@@ -132,8 +255,7 @@ class TimetableReviewScreen extends ConsumerWidget {
                           top: AppSpacing.lg, bottom: AppSpacing.sm),
                       child: Text(
                         day,
-                        style: AppTextStyles.headlineMd.copyWith(
-                            color: onSurface),
+                        style: AppTextStyles.headlineMd.copyWith(color: onSurface),
                       ),
                     ),
                     ...entries.asMap().entries.map((entry) {
