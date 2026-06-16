@@ -39,7 +39,13 @@ class ManageTimetableScreen extends ConsumerWidget {
           'Manage Timetable',
           style: AppTextStyles.headlineMd.copyWith(color: onSurface),
         ),
-        actions: const [],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.grid_view_rounded),
+            tooltip: 'Build with suggestions',
+            onPressed: () => context.push('/timetable/builder'),
+          ),
+        ],
         // OCR import button — disabled until OCR feature is ready
         // actions: [
         //   // Import via OCR
@@ -71,6 +77,7 @@ class ManageTimetableScreen extends ConsumerWidget {
             return _EmptyBody(
               primary: primary,
               onAddManual: () => context.push('/timetable/manual-entry'),
+              onBuildWithSuggestions: () => context.push('/timetable/builder'),
               // OCR import — disabled until OCR feature is ready
               // onImport: () => context.push('/timetable/upload'),
             );
@@ -477,12 +484,14 @@ class _DeleteDialogState extends State<_DeleteDialog> {
 class _EmptyBody extends StatelessWidget {
   final Color primary;
   final VoidCallback onAddManual;
+  final VoidCallback onBuildWithSuggestions;
   // OCR import callback — disabled until OCR feature is ready
   // final VoidCallback onImport;
 
   const _EmptyBody({
     required this.primary,
     required this.onAddManual,
+    required this.onBuildWithSuggestions,
     // required this.onImport,
   });
 
@@ -508,7 +517,7 @@ class _EmptyBody extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Add your classes manually to get started.',
+              'Add classes one by one or use the builder for\nsubject & teacher autocomplete suggestions.',
               style: AppTextStyles.bodyLg
                   .copyWith(color: onSurfaceVariant, height: 1.5),
               textAlign: TextAlign.center,
@@ -517,11 +526,30 @@ class _EmptyBody extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
+                onPressed: onBuildWithSuggestions,
+                icon: const Icon(Icons.auto_awesome_outlined),
+                label: const Text('Build with Suggestions'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: primary,
+                  padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.md),
+                  shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusMd),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
                 onPressed: onAddManual,
                 icon: const Icon(Icons.add),
                 label: const Text('Add Class Manually'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: primary,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: primary,
+                  side: BorderSide(color: primary),
                   padding: const EdgeInsets.symmetric(
                       vertical: AppSpacing.md),
                   shape: RoundedRectangleBorder(
@@ -556,6 +584,7 @@ class _EmptyBody extends StatelessWidget {
       ),
     );
   }
+
 }
 
 // ── Error Body ────────────────────────────────────────────────────────────────

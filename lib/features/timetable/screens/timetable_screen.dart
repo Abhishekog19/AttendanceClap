@@ -87,11 +87,12 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
             tooltip: 'Manage Timetable',
             onPressed: () => context.push('/timetable/manage'),
           ),
-          IconButton(
-            icon: Icon(Icons.document_scanner_outlined, color: onSurfaceVariant),
-            tooltip: 'Import Timetable',
-            onPressed: () => context.push('/timetable/upload'),
-          ),
+          // OCR import button — disabled until OCR feature is ready
+          // IconButton(
+          //   icon: Icon(Icons.document_scanner_outlined, color: onSurfaceVariant),
+          //   tooltip: 'Import Timetable',
+          //   onPressed: () => context.push('/timetable/upload'),
+          // ),
         ],
       ),
       body: todayAsync.when(
@@ -1143,10 +1144,9 @@ class _EmptySchedule extends ConsumerWidget {
       return EmptyStateWidget(
         icon: Icons.table_chart_outlined,
         title: 'No timetable yet',
-        subtitle:
-            'Scan your timetable image, enter a share code, or build it manually.',
-        actionLabel: 'Set Up Timetable',
-        onAction: () => context.push('/timetable/upload'),
+        subtitle: 'Add your classes manually to get started.',
+        actionLabel: 'Add Classes',
+        onAction: () => context.push('/timetable/manage'),
       );
     }
 
