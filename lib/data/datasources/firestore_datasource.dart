@@ -16,7 +16,7 @@ FirestoreDatasource firestoreDatasource(Ref ref) => FirestoreDatasource();
 class FirestoreDatasource {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // ─── User Profile. ────────────────────────────────────────────────────────────
+  // ─── User Profile ────────────────────────────────────────────────────────────
 
   CollectionReference<Map<String, dynamic>> _usersRef() => _db.collection('users');
 
