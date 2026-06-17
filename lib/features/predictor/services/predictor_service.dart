@@ -31,13 +31,14 @@ class PredictorService {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    // Build a map: subjectName → remaining class count (future classes only)
+    // Build a map: subjectName.trim() → remaining class count (future classes only)
     final remainingMap = _buildRemainingMap(entries, semester, today);
 
     final predictions = subjects.map((subject) {
       final attended = subject.attendedClasses;
       final total = subject.totalClasses;
-      final remaining = remainingMap[subject.name] ?? 0;
+      // Normalise subject name to match timetable entry keys
+      final remaining = remainingMap[subject.name.trim()] ?? 0;
 
       final currentPct = _pct(attended, total);
       final safeBunks = _safeBunks(attended, total, goal);
@@ -144,7 +145,9 @@ class PredictorService {
     // Count missed sessions per subject name in the date range
     final missed = _countMissedInRange(entries, semester, range);
 
-    final predMap = {for (final p in predictions) p.subject.name: p};
+    // Key by trimmed name to handle whitespace mismatches between
+    // SubjectModel.name and TimetableEntry.subject
+    final predMap = {for (final p in predictions) p.subject.name.trim(): p};
 
     int totalAttendedBefore = 0;
     int totalClassesBefore = 0;
@@ -261,9 +264,13 @@ class PredictorService {
       _pct(attended + remaining, total + remaining);
 
   /// Risk level derivation.
+  ///
+  /// Critical  → student is BELOW the attendance goal.
+  /// Warning   → student is at or above goal, but has ≤ 2 safe bunks (very thin buffer).
+  /// Safe      → student is above goal with > 2 safe bunks.
   static RiskLevel _riskLevel(double currentPct, int safeBunks, double goal) {
-    if (currentPct < goal || safeBunks == 0) return RiskLevel.critical;
-    if (safeBunks <= 2) return RiskLevel.warning;
+    if (currentPct < goal) return RiskLevel.critical;    // actually below goal
+    if (safeBunks <= 2) return RiskLevel.warning;        // above goal but thin buffer
     return RiskLevel.safe;
   }
 
@@ -302,7 +309,9 @@ class PredictorService {
           .toList();
 
       for (final entry in dayEntries) {
-        counts[entry.subject] = (counts[entry.subject] ?? 0) + dates.length;
+        // Normalise subject name so trailing/leading spaces don't break matching
+        final subjectKey = entry.subject.trim();
+        counts[subjectKey] = (counts[subjectKey] ?? 0) + dates.length;
       }
     }
     return counts;
