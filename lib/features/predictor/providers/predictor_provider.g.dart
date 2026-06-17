@@ -43,7 +43,7 @@ final predictorSemesterProvider = AutoDisposeFutureProvider<Semester?>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef PredictorSemesterRef = AutoDisposeFutureProviderRef<Semester?>;
-String _$predictorDataHash() => r'b77c5dd59cb68e2a3de658a5c40aa552a36e48e9';
+String _$predictorDataHash() => r'731252c4ffaea8dda95be6e3a1c7026c648edc0e';
 
 /// See also [predictorData].
 @ProviderFor(predictorData)
@@ -61,7 +61,7 @@ final predictorDataProvider =
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef PredictorDataRef = AutoDisposeFutureProviderRef<PredictorData?>;
-String _$leavePlanResultHash() => r'4af159cb1cfa75638b5bc2c541ab22fe6190f4f9';
+String _$leavePlanResultHash() => r'79388739a1ca726921edf26b85220a2b0bfc7a9f';
 
 /// See also [leavePlanResult].
 @ProviderFor(leavePlanResult)
@@ -78,7 +78,7 @@ final leavePlanResultProvider = AutoDisposeProvider<LeavePlanResult?>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef LeavePlanResultRef = AutoDisposeProviderRef<LeavePlanResult?>;
-String _$whatIfResultHash() => r'11a857b100749d8b5cc067c49f673c81256b4e62';
+String _$whatIfResultHash() => r'f5b015c4763421a488dc532dde56e6d4519a9d1c';
 
 /// See also [whatIfResult].
 @ProviderFor(whatIfResult)
