@@ -1,100 +1,146 @@
+import 'package:flutter/material.dart' show DateTimeRange;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../../core/utils/attendance_calculator.dart';
+import '../../../data/models/timetable_entry_model.dart';
+import '../../../data/models/semester_model.dart';
+import '../../../data/repositories/timetable_repository.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 import '../../profile/providers/profile_provider.dart';
+import '../models/leave_plan_result.dart';
+import '../services/predictor_service.dart';
 
 part 'predictor_provider.g.dart';
 
-class PredictorState {
-  final int futureAttended;
-  final int futureMissed;
-  final double currentAttended;
-  final double currentTotal;
-  final double goal;
-
-  const PredictorState({
-    this.futureAttended = 0,
-    this.futureMissed = 0,
-    this.currentAttended = 85,
-    this.currentTotal = 100,
-    this.goal = 75.0,
-  });
-
-  double get predictedPercentage => AttendanceCalculator.simulateFutureAttendance(
-        currentAttended: currentAttended.round(),
-        currentTotal: currentTotal.round(),
-        futureAttended: futureAttended,
-        futureMissed: futureMissed,
-      );
-
-  int get safeBunks => AttendanceCalculator.getSafeBunks(
-        attended: currentAttended.round() + futureAttended,
-        total: currentTotal.round() + futureAttended + futureMissed,
-        targetPercent: goal,
-      );
-
-  String get riskLevel {
-    final pct = predictedPercentage;
-    if (pct >= goal + 10) return 'Low';
-    if (pct >= goal) return 'Medium';
-    return 'High';
-  }
-
-  PredictorStatus get status {
-    final pct = predictedPercentage;
-    if (pct >= goal + 5) return PredictorStatus.safe;
-    if (pct >= goal) return PredictorStatus.caution;
-    return PredictorStatus.danger;
-  }
-
-  PredictorState copyWith({int? futureAttended, int? futureMissed}) => PredictorState(
-        futureAttended: futureAttended ?? this.futureAttended,
-        futureMissed: futureMissed ?? this.futureMissed,
-        currentAttended: currentAttended,
-        currentTotal: currentTotal,
-        goal: goal,
-      );
-}
-
-enum PredictorStatus { safe, caution, danger }
+// ─── Timetable entries stream (reuses TimetableRepository stream) ─────────────
 
 @riverpod
-class PredictorNotifier extends _$PredictorNotifier {
-  @override
-  PredictorState build() {
-    final dashboard = ref.watch(dashboardNotifierProvider).valueOrNull;
-    final goal = ref.watch(attendanceGoalProvider);
-
-    // Aggregate current stats from dashboard
-    double totalAttended = 0;
-    double totalClasses = 0;
-    if (dashboard != null) {
-      for (final s in dashboard.subjects) {
-        totalAttended += s.attendedClasses;
-        totalClasses += s.totalClasses;
-      }
-    }
-    if (totalClasses == 0) { totalAttended = 85; totalClasses = 100; }
-
-    return PredictorState(
-      currentAttended: totalAttended,
-      currentTotal: totalClasses,
-      goal: goal,
-    );
-  }
-
-  void incrementAttended() => state = state.copyWith(
-      futureAttended: state.futureAttended + 1);
-
-  void decrementAttended() => state = state.copyWith(
-      futureAttended: (state.futureAttended - 1).clamp(0, 999));
-
-  void incrementMissed() => state = state.copyWith(
-      futureMissed: state.futureMissed + 1);
-
-  void decrementMissed() => state = state.copyWith(
-      futureMissed: (state.futureMissed - 1).clamp(0, 999));
-
-  void reset() => state = state.copyWith(futureAttended: 0, futureMissed: 0);
+Stream<List<TimetableEntry>> predictorEntriesStream(Ref ref) {
+  return ref.watch(timetableRepositoryProvider).watchTimetableEntries();
 }
+
+// ─── Active semester (one-time fetch) ─────────────────────────────────────────
+
+@riverpod
+Future<Semester?> predictorSemester(Ref ref) {
+  return ref.watch(timetableRepositoryProvider).getActiveSemester();
+}
+
+// ─── Main predictor data (memoised — recomputes only when deps change) ────────
+
+@riverpod
+Future<PredictorData?> predictorData(Ref ref) async {
+  // Watch goal FIRST (synchronous) so it is registered as a dependency
+  // before any await. If goal changes (user updates settings), the provider
+  // automatically recomputes with the new value.
+  final goal = ref.watch(attendanceGoalProvider);
+
+  final subjects = await ref.watch(subjectsStreamProvider.future);
+  final semester = await ref.watch(predictorSemesterProvider.future);
+  final entries = await ref.watch(predictorEntriesStreamProvider.future);
+
+  if (semester == null || subjects.isEmpty || entries.isEmpty) return null;
+
+  final predictions = PredictorService.computePredictions(
+    subjects: subjects,
+    entries: entries,
+    semester: semester,
+    goal: goal,
+  );
+
+  return PredictorData(
+    predictions: predictions,
+    entries: entries,
+    semester: semester,
+    overallCurrentPct: PredictorService.overallCurrentPct(predictions),
+    overallProjectedPct: PredictorService.overallProjectedPct(predictions),
+    totalSafeBunks: PredictorService.totalSafeBunks(predictions),
+    criticalCount: PredictorService.criticalCount(predictions),
+    goal: goal,
+  );
+}
+
+// ─── What-If Simulator state ──────────────────────────────────────────────────
+
+class WhatIfState {
+  final String? subjectId;
+  final int missedClasses;
+
+  const WhatIfState({this.subjectId, this.missedClasses = 0});
+
+  WhatIfState copyWith({String? subjectId, int? missedClasses}) => WhatIfState(
+        subjectId: subjectId ?? this.subjectId,
+        missedClasses: missedClasses ?? this.missedClasses,
+      );
+}
+
+@riverpod
+class WhatIfNotifier extends _$WhatIfNotifier {
+  @override
+  WhatIfState build() => const WhatIfState();
+
+  void selectSubject(String? subjectId) =>
+      state = state.copyWith(subjectId: subjectId, missedClasses: 0);
+
+  void setMissed(int missed) =>
+      state = state.copyWith(missedClasses: missed.clamp(0, 15));
+}
+
+// ─── Leave Planner state ──────────────────────────────────────────────────────
+
+@riverpod
+class LeavePlannerNotifier extends _$LeavePlannerNotifier {
+  @override
+  DateTimeRange? build() => null;
+
+  void setRange(DateTimeRange? range) => state = range;
+  void clear() => state = null;
+}
+
+// ─── Leave plan result (derived — recomputes when range or data changes) ──────
+
+@riverpod
+LeavePlanResult? leavePlanResult(Ref ref) {
+  final range = ref.watch(leavePlannerNotifierProvider);
+  final dataAsync = ref.watch(predictorDataProvider);
+  if (range == null) return null;
+
+  final data = dataAsync.valueOrNull;
+  if (data == null) return null;
+  return PredictorService.simulateLeave(
+    predictions: data.predictions,
+    entries: data.entries,
+    semester: data.semester,
+    range: range,
+  );
+}
+
+// ─── What-if result (derived) ─────────────────────────────────────────────────
+
+@riverpod
+double? whatIfResult(Ref ref) {
+  final state = ref.watch(whatIfNotifierProvider);
+  final dataAsync = ref.watch(predictorDataProvider);
+  if (state.subjectId == null) return null;
+
+  final data = dataAsync.valueOrNull;
+  if (data == null) return null;
+  final pred = data.predictions
+      .where((p) => p.subject.id == state.subjectId)
+      .firstOrNull;
+  if (pred == null) return null;
+  return PredictorService.simulateMiss(
+    prediction: pred,
+    missedClasses: state.missedClasses,
+  );
+}
+
+// ─── Legacy compat: Keep old provider name so existing route/nav still works ──
+// (The old PredictorState/PredictorNotifier is no longer needed — removed.)
+
+// ─── Subject filter (empty set = show all subjects) ──────────────────────────
+//
+// Plain StateProvider — no code-gen needed.
+// Holds the Set of subject IDs the user has selected.
+// Empty → all subjects visible (default).
+final subjectFilterProvider = StateProvider<Set<String>>((ref) => const {});
