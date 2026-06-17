@@ -62,14 +62,25 @@ Future<PredictorData?> predictorData(Ref ref) async {
 
 // ─── What-If Simulator state ──────────────────────────────────────────────────
 
+// Sentinel — distinguishes "parameter not provided" from "explicitly null".
+const _absent = Object();
+
 class WhatIfState {
   final String? subjectId;
   final int missedClasses;
 
   const WhatIfState({this.subjectId, this.missedClasses = 0});
 
-  WhatIfState copyWith({String? subjectId, int? missedClasses}) => WhatIfState(
-        subjectId: subjectId ?? this.subjectId,
+  /// Pass [subjectId] explicitly (even as null) to override it.
+  /// Omit [subjectId] entirely to keep the current value.
+  WhatIfState copyWith({
+    Object? subjectId = _absent,
+    int? missedClasses,
+  }) =>
+      WhatIfState(
+        subjectId: identical(subjectId, _absent)
+            ? this.subjectId
+            : subjectId as String?,
         missedClasses: missedClasses ?? this.missedClasses,
       );
 }

@@ -171,8 +171,14 @@ class PredictorService {
 
       // Recovery: classes to attend AFTER leave to get back to goal%
       // Formula: ceil((goal * newTotal - attended) / (1 - goal))
-      final rawRecovery = (goalPct * (total + missedCount) - attended) / (1 - goalPct);
-      final recoveryNeeded = rawRecovery > 0 ? rawRecovery.ceil().clamp(0, 999) : 0;
+      // Guard: goal=100% → goalPct=1, denominator=0 → cap at 999
+      final recoveryNeeded = goalPct >= 1
+          ? 999
+          : () {
+              final rawRecovery =
+                  (goalPct * (total + missedCount) - attended) / (1 - goalPct);
+              return rawRecovery > 0 ? rawRecovery.ceil().clamp(0, 999) : 0;
+            }();
 
       totalAttendedBefore += attended;
       totalClassesBefore += total;
@@ -191,7 +197,8 @@ class PredictorService {
 
     // Add subjects not in date range with 0 delta for overall calculation
     for (final pred in predictions) {
-      if (!missed.containsKey(pred.subject.name)) {
+      // Use trimmed name — _countMissedInRange keys are also trimmed
+      if (!missed.containsKey(pred.subject.name.trim())) {
         totalAttendedBefore += pred.attended;
         totalClassesBefore += pred.total;
         totalAttendedAfter += pred.attended;
@@ -246,6 +253,8 @@ class PredictorService {
   static int _safeBunks(int attended, int total, double goal) {
     if (total == 0) return 0;
     final required = goal / 100;
+    // Guard: goal=0% → required=0, division by zero → return 0 (undefined bunk count)
+    if (required <= 0) return 0;
     final bunks = (attended / required) - total;
     return bunks > 0 ? bunks.floor() : 0;
   }
@@ -255,6 +264,8 @@ class PredictorService {
     final required = goal / 100;
     final current = total > 0 ? attended / total : 0.0;
     if (current >= required) return 0;
+    // Guard: goal=100% → required=1, denominator=0 → impossible to recover, cap at 999
+    if (required >= 1) return 999;
     final needed = (required * total - attended) / (1 - required);
     return needed.ceil().clamp(0, 999);
   }
@@ -344,7 +355,9 @@ class PredictorService {
       }).toList();
 
       for (final entry in dayEntries) {
-        counts[entry.subject] = (counts[entry.subject] ?? 0) + dates.length;
+        // Trim to match the predMap keys (which are also trimmed)
+        final subjectKey = entry.subject.trim();
+        counts[subjectKey] = (counts[subjectKey] ?? 0) + dates.length;
       }
     }
     return counts;

@@ -38,18 +38,30 @@ class _WhatIfSimulatorState extends ConsumerState<WhatIfSimulator> {
         isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
 
+    final hasRemaining = widget.prediction.remainingClasses > 0;
+    // Clamp to min 1 only to keep the Slider's max >= min invariant.
+    // When hasRemaining is false the slider is disabled and _missed stays 0.
     final maxSlider =
         widget.prediction.remainingClasses.clamp(1, 20).toDouble();
-    final bd = PredictorService.whatIfBreakdown(
-      prediction: widget.prediction,
-      missedClasses: _missed,
-    );
 
-    final isBelow = bd.predictedPct < bd.goal;
+    // Only compute breakdown when there are remaining classes to simulate.
+    final bd = hasRemaining
+        ? PredictorService.whatIfBreakdown(
+            prediction: widget.prediction,
+            missedClasses: _missed,
+          )
+        : null;
+
+    // Treat _missed=0 as no change when bd is null
+    final isBelow = bd != null
+        ? bd.predictedPct < bd.goal
+        : widget.prediction.currentPct < widget.prediction.goal;
     final accentColor = isBelow ? AppColors.error : AppColors.success;
 
-    // Delta vs current
-    final delta = bd.predictedPct - widget.prediction.currentPct;
+    // Delta vs current (0 when nothing simulated)
+    final delta = bd != null
+        ? bd.predictedPct - widget.prediction.currentPct
+        : 0.0;
 
     return Padding(
       padding:
@@ -166,8 +178,10 @@ class _WhatIfSimulatorState extends ConsumerState<WhatIfSimulator> {
                         min: 0,
                         max: maxSlider,
                         divisions: maxSlider.toInt(),
-                        onChanged: (v) =>
-                            setState(() => _missed = v.round()),
+                        // Disabled when no remaining classes to simulate
+                        onChanged: hasRemaining
+                            ? (v) => setState(() => _missed = v.round())
+                            : null,
                       ),
                     ),
                     Row(
@@ -184,160 +198,186 @@ class _WhatIfSimulatorState extends ConsumerState<WhatIfSimulator> {
 
                     const SizedBox(height: 20),
 
-                    // ── Before → After ─────────────────────────────────────
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _PctTile(
-                            title: 'Now',
-                            pct: widget.prediction.currentPct,
-                            sub:
-                                '${widget.prediction.attended}/${widget.prediction.total} lecs',
-                            color: onSurface,
-                            surface: surface,
-                          ),
+                    if (!hasRemaining) ...[
+                      // ── No-remaining empty state ────────────────────────
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Column(
-                            children: [
-                              Icon(Icons.arrow_forward_rounded,
-                                  color: onSurfaceVariant, size: 18),
-                              const SizedBox(height: 4),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: delta < 0
-                                      ? AppColors.error.withValues(alpha: 0.1)
-                                      : AppColors.success
-                                          .withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  '${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(1)}%',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    color: delta < 0
-                                        ? AppColors.error
-                                        : AppColors.success,
-                                  ),
-                                ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.event_busy_outlined,
+                                size: 18, color: onSurfaceVariant),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'No remaining classes scheduled for this subject. Nothing to simulate.',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: onSurfaceVariant,
+                                    height: 1.4),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                        Expanded(
-                          child: _PctTile(
-                            title: 'After Bunk',
-                            pct: bd.predictedPct,
-                            sub:
-                                '${bd.attendedSoFar}/${bd.totalLectures} lecs',
-                            color: accentColor,
-                            surface: surface,
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // ── Breakdown card ─────────────────────────────────────
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: surface,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                            color: accentColor.withValues(alpha: 0.2)),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    ] else ...[
+                      // ── Before → After ──────────────────────────────────
+                      Row(
                         children: [
-                          Text(
-                            'LECTURE BREAKDOWN',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1,
-                              color: onSurfaceVariant,
+                          Expanded(
+                            child: _PctTile(
+                              title: 'Now',
+                              pct: widget.prediction.currentPct,
+                              sub:
+                                  '${widget.prediction.attended}/${widget.prediction.total} lecs',
+                              color: onSurface,
+                              surface: surface,
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          _BdRow(
-                            icon: Icons.check_circle_outline,
-                            iconColor: AppColors.success,
-                            label: 'Attended so far',
-                            value: '${bd.attendedSoFar} lecs',
-                            onSurface: onSurface,
-                            onSurfaceVariant: onSurfaceVariant,
-                          ),
-                          _BdRow(
-                            icon: Icons.do_not_disturb_on_outlined,
-                            iconColor: AppColors.error,
-                            label: 'Planning to bunk',
-                            value: '${bd.missedClasses} lecs',
-                            onSurface: onSurface,
-                            onSurfaceVariant: onSurfaceVariant,
-                          ),
-                          _BdRow(
-                            icon: Icons.upcoming_outlined,
-                            iconColor: primary,
-                            label: 'Remaining after bunk',
-                            value: '${bd.remainingAfterBunk} lecs',
-                            onSurface: onSurface,
-                            onSurfaceVariant: onSurfaceVariant,
-                          ),
-
-                          const SizedBox(height: 12),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: accentColor.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Column(
                               children: [
-                                Icon(
-                                  bd.minPresentNeeded == 0
-                                      ? Icons.check_circle_rounded
-                                      : bd.isAchievable
-                                          ? Icons.info_outline_rounded
-                                          : Icons.dangerous_outlined,
-                                  size: 16,
-                                  color: accentColor,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
+                                Icon(Icons.arrow_forward_rounded,
+                                    color: onSurfaceVariant, size: 18),
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: delta < 0
+                                        ? AppColors.error.withValues(alpha: 0.1)
+                                        : AppColors.success
+                                            .withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
                                   child: Text(
-                                    bd.minPresentNeeded == 0
-                                        ? "You're safe! Well above ${bd.goal.toStringAsFixed(0)}%."
-                                        : bd.isAchievable
-                                            ? "Attend at least ${bd.minPresentNeeded} of the "
-                                              "${bd.remainingAfterBunk} remaining lectures "
-                                              "to stay above ${bd.goal.toStringAsFixed(0)}%."
-                                            : "Even attending all ${bd.remainingAfterBunk} "
-                                              "remaining lectures, you cannot reach "
-                                              "${bd.goal.toStringAsFixed(0)}% by semester end.",
+                                    '${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(1)}%',
                                     style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                        color: accentColor,
-                                        height: 1.4),
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: delta < 0
+                                          ? AppColors.error
+                                          : AppColors.success,
+                                    ),
                                   ),
                                 ),
                               ],
                             ),
                           ),
+                          Expanded(
+                            child: _PctTile(
+                              title: 'After Bunk',
+                              pct: bd!.predictedPct,
+                              sub:
+                                  '${bd.attendedSoFar}/${bd.totalLectures} lecs',
+                              color: accentColor,
+                              surface: surface,
+                            ),
+                          ),
                         ],
                       ),
-                    ),
 
-                    const SizedBox(height: 8),
+                      const SizedBox(height: 16),
+
+                      // ── Breakdown card ──────────────────────────────────
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: accentColor.withValues(alpha: 0.2)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'LECTURE BREAKDOWN',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1,
+                                color: onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            _BdRow(
+                              icon: Icons.check_circle_outline,
+                              iconColor: AppColors.success,
+                              label: 'Attended so far',
+                              value: '${bd.attendedSoFar} lecs',
+                              onSurface: onSurface,
+                              onSurfaceVariant: onSurfaceVariant,
+                            ),
+                            _BdRow(
+                              icon: Icons.do_not_disturb_on_outlined,
+                              iconColor: AppColors.error,
+                              label: 'Planning to bunk',
+                              value: '${bd.missedClasses} lecs',
+                              onSurface: onSurface,
+                              onSurfaceVariant: onSurfaceVariant,
+                            ),
+                            _BdRow(
+                              icon: Icons.upcoming_outlined,
+                              iconColor: primary,
+                              label: 'Remaining after bunk',
+                              value: '${bd.remainingAfterBunk} lecs',
+                              onSurface: onSurface,
+                              onSurfaceVariant: onSurfaceVariant,
+                            ),
+
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: accentColor.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    bd.minPresentNeeded == 0
+                                        ? Icons.check_circle_rounded
+                                        : bd.isAchievable
+                                            ? Icons.info_outline_rounded
+                                            : Icons.dangerous_outlined,
+                                    size: 16,
+                                    color: accentColor,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      bd.minPresentNeeded == 0
+                                          ? "You're safe! Well above ${bd.goal.toStringAsFixed(0)}%."
+                                          : bd.isAchievable
+                                              ? "Attend at least ${bd.minPresentNeeded} of the "
+                                                "${bd.remainingAfterBunk} remaining lectures "
+                                                "to stay above ${bd.goal.toStringAsFixed(0)}%."
+                                              : "Even attending all ${bd.remainingAfterBunk} "
+                                                "remaining lectures, you cannot reach "
+                                                "${bd.goal.toStringAsFixed(0)}% by semester end.",
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: accentColor,
+                                          height: 1.4),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

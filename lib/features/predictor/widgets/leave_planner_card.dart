@@ -334,11 +334,24 @@ class LeavePlannerCard extends ConsumerWidget {
 
   Future<void> _pickDateRange(
       BuildContext context, WidgetRef ref, DateTimeRange? current) async {
-    final now = DateTime.now();
+    // Normalize to midnight so time-of-day never makes firstDate > lastDate
+    final today = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+    );
+    final lastDate = DateTime(
+      data.semester.endDate.year,
+      data.semester.endDate.month,
+      data.semester.endDate.day,
+    );
+    // Guard: semester has already ended — picker would crash with firstDate > lastDate
+    if (today.isAfter(lastDate)) return;
+
     final range = await showDateRangePicker(
       context: context,
-      firstDate: now,
-      lastDate: data.semester.endDate,
+      firstDate: today,
+      lastDate: lastDate,
       initialDateRange: current,
       helpText: 'SELECT LEAVE PERIOD',
       saveText: 'SIMULATE',
