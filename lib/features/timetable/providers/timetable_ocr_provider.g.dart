@@ -22,7 +22,7 @@ final editedTimetableProvider = NotifierProvider<EditedTimetable,
 );
 
 typedef _$EditedTimetable = Notifier<Map<String, List<TimetableEntry>>>;
-String _$timetableOcrHash() => r'a6f37440c784c50838b3454c8cf73ae38adfa25e';
+String _$timetableOcrHash() => r'e6f9703bffd5e01e055961bb96fbbd5f6364201c';
 
 /// See also [TimetableOcr].
 @ProviderFor(TimetableOcr)
