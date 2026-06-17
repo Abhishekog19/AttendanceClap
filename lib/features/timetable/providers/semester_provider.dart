@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../../../data/models/semester_model.dart';
 import '../../../data/models/timetable_entry_model.dart';
 import '../../../data/repositories/timetable_repository.dart';
+import '../../../data/services/historical_sync_service.dart';
 
 part 'semester_provider.g.dart';
 
@@ -102,6 +103,7 @@ class SemesterNotifier extends _$SemesterNotifier {
   Future<void> generateSchedule({
     List<TimetableEntry> entries = const [],
     required TimetableRepository repo,
+    HistoricalSyncService? historicalSync,
   }) async {
     if (!state.isValid) {
       state = state.copyWith(error: 'Please select valid start and end dates.');
@@ -150,6 +152,22 @@ class SemesterNotifier extends _$SemesterNotifier {
         onProgress: (p) =>
             state = state.copyWith(generationProgress: p),
       );
+
+      // 6. Sync historical conducted counts for mid-semester users.
+      //    Updates totalClasses on subjects for sessions before today.
+      //    Guard (historicalSyncDone flag) prevents double-running.
+      if (historicalSync != null) {
+        try {
+          await historicalSync.syncHistoricalConductedCounts(
+            semesterId: semester.id,
+            semesterStartDate: semester.startDate,
+          );
+        } catch (e) {
+          // Non-fatal: sync failure should not block timetable setup
+          // ignore: avoid_print
+          print('[SemesterNotifier] Historical sync failed (non-fatal): $e');
+        }
+      }
 
       state = state.copyWith(
         isGenerating: false,

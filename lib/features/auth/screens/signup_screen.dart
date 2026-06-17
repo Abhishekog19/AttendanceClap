@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../core/utils/auth_error_mapper.dart';
 import '../providers/auth_provider.dart';
 
 class SignupScreen extends ConsumerStatefulWidget {
@@ -50,7 +51,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       if (next is AsyncError) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(next.error.toString()),
+            content: Text(AuthErrorMapper.map(next.error!)),
             backgroundColor: AppColors.error,
           ),
         );
@@ -128,7 +129,16 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   ),
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Required';
-                    if (v.length < 6) return 'Minimum 6 characters';
+                    if (v.length < 8) return 'Password must be at least 8 characters';
+                    if (!v.contains(RegExp(r'[A-Z]'))) {
+                      return 'Must contain at least one uppercase letter';
+                    }
+                    if (!v.contains(RegExp(r'[a-z]'))) {
+                      return 'Must contain at least one lowercase letter';
+                    }
+                    if (!v.contains(RegExp(r'[0-9]'))) {
+                      return 'Must contain at least one number';
+                    }
                     return null;
                   },
                 ),

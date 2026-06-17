@@ -8,6 +8,7 @@ import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../data/repositories/timetable_repository.dart';
 import '../../../data/models/timetable_entry_model.dart';
+import '../../../data/services/historical_sync_service.dart';
 import '../providers/semester_provider.dart';
 import '../providers/timetable_ocr_provider.dart';
 
@@ -301,9 +302,11 @@ class SemesterSetupScreen extends ConsumerWidget {
 
   Future<void> _generate(WidgetRef ref, List<TimetableEntry> entries) async {
     final repo = ref.read(timetableRepositoryProvider);
+    final syncService = ref.read(historicalSyncServiceProvider);
     await ref.read(semesterNotifierProvider.notifier).generateSchedule(
           entries: entries,
           repo: repo,
+          historicalSync: syncService,
         );
   }
 }

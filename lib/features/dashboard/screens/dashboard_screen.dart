@@ -7,6 +7,7 @@ import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/utils/attendance_calculator.dart';
 import '../../../data/repositories/auth_repository.dart';
+import '../../../features/notifications/providers/app_notification_provider.dart';
 import '../../../shared/widgets/loading_skeleton.dart';
 import '../../../shared/widgets/empty_state_widget.dart';
 import '../providers/dashboard_provider.dart';
@@ -87,10 +88,7 @@ class DashboardScreen extends ConsumerWidget {
                 ],
               ),
               actions: [
-                IconButton(
-                  icon: Icon(Icons.notifications_outlined, color: primary),
-                  onPressed: () {},
-                ),
+                _NotificationBell(primary: primary),
               ],
             ),
 
@@ -187,6 +185,56 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ─── Notification Bell with Badge ─────────────────────────────────────────────
+
+class _NotificationBell extends ConsumerWidget {
+  final Color primary;
+  const _NotificationBell({required this.primary});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unreadCount = ref.watch(unreadNotificationCountProvider);
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconButton(
+          icon: Icon(Icons.notifications_outlined, color: primary),
+          onPressed: () => context.push('/notifications/center'),
+          tooltip: 'Notifications',
+        ),
+        if (unreadCount > 0)
+          Positioned(
+            right: 6,
+            top: 6,
+            child: IgnorePointer(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.all(3),
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                decoration: BoxDecoration(
+                  color: AppColors.error,
+                  shape: unreadCount > 9 ? BoxShape.rectangle : BoxShape.circle,
+                  borderRadius: unreadCount > 9 ? BorderRadius.circular(9) : null,
+                ),
+                child: Text(
+                  unreadCount > 99 ? '99+' : '$unreadCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    height: 1,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

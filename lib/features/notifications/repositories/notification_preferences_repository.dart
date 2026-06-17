@@ -112,4 +112,42 @@ class NotificationPreferencesRepository {
       'resolvedAt': FieldValue.serverTimestamp(),
     });
   }
+
+  // ── Daily attendance warning deduplication ────────────────────────────────
+  // Prevents the aggregated attendance warning from being fired more than
+  // once per day. A Firestore document tracks the last fired date.
+
+  DocumentReference<Map<String, dynamic>> get _dailyWarningDoc => _firestore
+      .collection('users')
+      .doc(_uid)
+      .collection('notification_alert_state')
+      .doc('daily_warning');
+
+  /// Returns true if an aggregated attendance warning was already generated
+  /// today. Uses a stable date-key to prevent same-day duplicates.
+  Future<bool> hasWarningFiredToday() async {
+    if (_uid.isEmpty) return false;
+    try {
+      final doc = await _dailyWarningDoc.get();
+      if (!doc.exists) return false;
+      final lastFired = doc.data()?['lastFiredDate'] as String?;
+      final todayKey = _dateKey(DateTime.now());
+      return lastFired == todayKey;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Records that today's aggregated warning notification was sent.
+  Future<void> recordDailyWarningFired() async {
+    if (_uid.isEmpty) return;
+    await _dailyWarningDoc.set({
+      'lastFiredDate': _dateKey(DateTime.now()),
+      'firedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  String _dateKey(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 }
+

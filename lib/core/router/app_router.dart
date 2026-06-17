@@ -26,6 +26,7 @@ import '../../features/subjects/screens/subject_detail_screen.dart';
 import '../../features/attendance/screens/attendance_history_screen.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../features/notifications/screens/notification_settings_screen.dart';
+import '../../features/notifications/screens/notification_center_screen.dart';
 import '../../shared/widgets/main_shell.dart';
 import '../../data/models/subject_model.dart';
 import '../../data/models/timetable_entry_model.dart';
@@ -180,6 +181,11 @@ GoRouter appRouter(Ref ref) {
         path: '/notifications/settings',
         name: 'notificationSettings',
         builder: (context, state) => const NotificationSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/notifications/center',
+        name: 'notificationCenter',
+        builder: (context, state) => const NotificationCenterScreen(),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(
