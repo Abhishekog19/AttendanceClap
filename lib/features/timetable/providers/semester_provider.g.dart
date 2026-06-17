@@ -6,7 +6,7 @@ part of 'semester_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$semesterNotifierHash() => r'a9f70098818aed067e7b6db6ed52976118d3d29f';
+String _$semesterNotifierHash() => r'd706f52a816f03a97482a75d8c51a1841437fb6a';
 
 /// See also [SemesterNotifier].
 @ProviderFor(SemesterNotifier)
