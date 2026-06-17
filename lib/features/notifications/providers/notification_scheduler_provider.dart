@@ -4,6 +4,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../features/profile/providers/profile_provider.dart';
 import '../../../features/subjects/providers/subjects_provider.dart';
 import '../../../features/timetable/providers/timetable_provider.dart';
+import '../repositories/app_notification_repository.dart';
 import '../repositories/notification_preferences_repository.dart';
 import '../scheduler/notification_scheduler.dart';
 import 'notification_preferences_provider.dart';
@@ -33,6 +34,7 @@ Future<void> notificationSchedulerWatcher(Ref ref) async {
   final subjectsAsync = ref.watch(subjectsNotifierProvider);
   final attendanceGoal = ref.watch(attendanceGoalProvider);
   final alertRepo = ref.watch(notificationPreferencesRepositoryProvider);
+  final notifRepo = ref.watch(appNotificationRepositoryProvider);
 
   // Reconstruct a flat, ordered session list from the bucketed SchedulePageData.
   // This is the same merged list the Schedule screen renders.
@@ -51,5 +53,6 @@ Future<void> notificationSchedulerWatcher(Ref ref) async {
     subjects: subjects,
     attendanceGoal: attendanceGoal,
     alertRepo: alertRepo,
+    notificationRepo: notifRepo,
   );
 }

@@ -6,6 +6,8 @@ import 'package:timezone/timezone.dart' as tz;
 import '../../../data/models/class_session_model.dart';
 import '../../../data/models/subject_model.dart';
 import '../models/notification_preferences_model.dart';
+import '../models/app_notification_model.dart';
+import '../repositories/app_notification_repository.dart';
 import '../repositories/notification_preferences_repository.dart';
 import '../services/notification_channels.dart';
 import '../services/notification_service.dart';
@@ -33,6 +35,7 @@ class NotificationScheduler {
     required List<SubjectModel> subjects,
     required double attendanceGoal, // from UserModel.attendanceGoal
     required NotificationPreferencesRepository alertRepo,
+    AppNotificationRepository? notificationRepo,
   }) async {
     if (!prefs.notificationsEnabled) {
       await _svc.cancelAll();
@@ -52,11 +55,13 @@ class NotificationScheduler {
         sessions: todaySessions,
         subjects: subjects,
         prefs: prefs);
-    await checkLowAttendanceAlerts(
+    await checkDailyAttendanceWarning(
+        sessions: todaySessions,
         subjects: subjects,
         attendanceGoal: attendanceGoal,
         prefs: prefs,
-        repo: alertRepo);
+        repo: alertRepo,
+        notificationRepo: notificationRepo);
   }
 
   // ── Type 1: Class Reminders ───────────────────────────────────────────────
@@ -202,50 +207,114 @@ class NotificationScheduler {
     }
   }
 
-  // ── Type 3: Low Attendance Alerts ─────────────────────────────────────────
+  // ── Type 3: Daily Aggregated Attendance Warning ───────────────────────────
+  //
+  // Generates AT MOST ONE warning per day, combining all below-threshold
+  // subjects into a single notification. Fires 2h after the last session ends.
+  // Subjects with 0% attendance (totalClasses == 0) are excluded.
 
-  Future<void> checkLowAttendanceAlerts({
+  Future<void> checkDailyAttendanceWarning({
+    required List<ClassSession> sessions,
     required List<SubjectModel> subjects,
-    required double attendanceGoal, // from UserModel.attendanceGoal (profile)
+    required double attendanceGoal,
     required NotificationPreferences prefs,
     required NotificationPreferencesRepository repo,
+    AppNotificationRepository? notificationRepo,
   }) async {
     if (!prefs.lowAttendanceAlertsEnabled) return;
 
-    for (final subject in subjects) {
-      if (subject.totalClasses == 0) continue;
+    // Dedup: only fire once per day
+    final alreadyFiredToday = await repo.hasWarningFiredToday();
+    if (alreadyFiredToday) {
+      // ignore: avoid_print
+      print('[NotificationScheduler] Daily warning already fired today — skipping.');
+      return;
+    }
 
-      final pct = subject.attendancePercentage;
-      final threshold = attendanceGoal; // use profile goal per spec
+    // Filter subjects: must have classes AND be below threshold
+    final lowSubjects = subjects.where((s) {
+      if (s.totalClasses == 0) return false; // Skip 0% (no data)
+      return s.attendancePercentage < attendanceGoal;
+    }).toList();
 
-      if (pct < threshold) {
-        // Check if an unresolved alert already exists
-        final hasUnresolved = await repo.hasUnresolvedAlert(subject.id);
-        if (hasUnresolved) continue; // don't spam
+    if (lowSubjects.isEmpty) return;
 
-        // Calculate classes needed to recover
-        final classesNeeded = _classesNeededToRecover(
-            attended: subject.attendedClasses,
-            total: subject.totalClasses,
-            target: threshold / 100);
+    // Build aggregated message
+    final lines = lowSubjects.map((s) {
+      final classesNeeded = _classesNeededToRecover(
+        attended: s.attendedClasses,
+        total: s.totalClasses,
+        target: attendanceGoal / 100,
+      );
+      return '• ${s.name} → Attend next $classesNeeded class${classesNeeded == 1 ? '' : 'es'}';
+    }).join('\n');
 
-        await _svc.showLowAttendanceAlert(
-          subject: subject,
-          currentPercentage: pct,
-          threshold: threshold,
-          classesNeeded: classesNeeded,
-          includeRecovery: prefs.recoverySuggestionsEnabled,
-        );
+    final title = '📊 Attendance Alert';
+    final body = 'The following subjects are below your target:\n\n$lines';
 
-        await repo.recordAlertFired(subject.id);
-      } else {
-        // Attendance recovered → reset alert so it can fire again next drop
-        final hasUnresolved = await repo.hasUnresolvedAlert(subject.id);
-        if (hasUnresolved) {
-          await repo.recordAlertResolved(subject.id);
-        }
+    // Determine fire time: 2h after last session ends today
+    final now = DateTime.now();
+    DateTime fireTime;
+
+    if (sessions.isNotEmpty) {
+      // Find the latest end time among today's non-cancelled sessions
+      final latestEndMinutes = sessions
+          .where((s) => !s.isCancelled)
+          .map((s) => _parseMinutes(s.displayEndTime))
+          .fold(0, (max, v) => v > max ? v : max);
+
+      final lastSessionEnd = _todayAtMinutes(latestEndMinutes, now);
+      // Schedule 2h after last session, but no earlier than 5 minutes from now
+      fireTime = lastSessionEnd.add(const Duration(hours: 2));
+      if (fireTime.isBefore(now.add(const Duration(minutes: 5)))) {
+        fireTime = now.add(const Duration(minutes: 5));
+      }
+    } else {
+      // No sessions today — fire in 5 minutes as a fallback
+      fireTime = now.add(const Duration(minutes: 5));
+    }
+
+    // Skip quiet hours
+    if (prefs.isQuietHour(fireTime)) {
+      // ignore: avoid_print
+      print('[NotificationScheduler] Warning suppressed — quiet hours.');
+      return;
+    }
+
+    // Stable notification ID for today (avoids duplicates on system tray)
+    final dateKey = _dateKey(now);
+    final notifId = stableNotificationId('daily_warning_$dateKey') + 50000;
+
+    await _svc.scheduleOnce(
+      id: notifId,
+      title: title,
+      body: body,
+      scheduledDate: tz.TZDateTime.from(fireTime, tz.local),
+      channelId: NotificationChannels.attendanceAlerts,
+      channelName: 'Attendance Alerts',
+      bigText: true,
+    );
+
+    // Record in Firestore notification center (if repo provided)
+    if (notificationRepo != null) {
+      final centerId = 'attendanceWarning_$dateKey';
+      final alreadyStored = await notificationRepo.notificationExists(centerId);
+      if (!alreadyStored) {
+        await notificationRepo.addNotification(AppNotificationModel(
+          id: centerId,
+          title: title,
+          message: body,
+          type: AppNotificationType.attendanceWarning,
+          createdAt: DateTime.now(),
+          isRead: false,
+        ));
       }
     }
+
+    // Record dedup flag
+    await repo.recordDailyWarningFired();
+    // ignore: avoid_print
+    print('[NotificationScheduler] Daily warning scheduled for $fireTime — ${lowSubjects.length} subjects.');
   }
 
   // ── Type 4: Safe Bunk Planner ─────────────────────────────────────────────

@@ -66,7 +66,13 @@ class AuthRepository {
   }
 
   Future<UserCredential> signInWithGoogle() async {
-    final googleUser = await GoogleSignIn().signIn();
+    // Force the Google account chooser to appear even for returning users.
+    // This is the critical fix for account switching — without signOut() here,
+    // Google returns the previously-used account silently without showing the picker.
+    final googleSignIn = GoogleSignIn();
+    await googleSignIn.signOut(); // clear cached account → forces picker
+
+    final googleUser = await googleSignIn.signIn();
     if (googleUser == null) throw Exception('Google Sign-In cancelled');
 
     final googleAuth = await googleUser.authentication;
