@@ -2,17 +2,22 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../data/models/subject_model.dart';
 import '../../../data/repositories/subject_repository.dart';
+import '../../dashboard/providers/dashboard_provider.dart';
 
 part 'subjects_provider.g.dart';
+
+// ── TASK 9 FIX: Removed the inline anonymous StreamProvider anti-pattern.
+// SubjectsNotifier.build() now watches the top-level subjectsStreamProvider
+// from dashboard_provider.dart — a single, stable Riverpod-managed listener.
+// Previously, each rebuild of SubjectsNotifier instantiated a new StreamProvider
+// inside build(), which could silently recreate the Firestore listener.
 
 @riverpod
 class SubjectsNotifier extends _$SubjectsNotifier {
   @override
   AsyncValue<List<SubjectModel>> build() {
-    final stream = ref.watch(subjectRepositoryProvider).watchSubjects();
-    return ref.watch(
-      StreamProvider((ref) => stream).select((v) => v),
-    );
+    // Watch the top-level stream provider — never recreated on rebuild.
+    return ref.watch(subjectsStreamProvider);
   }
 
   Future<void> addSubject({

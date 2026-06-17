@@ -62,18 +62,19 @@ class ManualTimetableNotifier extends _$ManualTimetableNotifier {
   Future<void> addEntry(TimetableEntry entry) async {
     state = state.copyWith(status: ManualEntryStatus.saving, errorMessage: null);
     try {
-      // 1. Persist the entry
-      await _repo.addTimetableEntry(entry);
-
-      // 2. Ensure subject exists; create if not
+      // 1. Ensure subject exists; create if not — get the canonical subjectId
       final subjectId = await _ensureSubjectExists(entry);
+
+      // 2. Persist the entry WITH subjectId so the subject link survives renames
+      final entryWithId = entry.copyWith(subjectId: subjectId);
+      await _repo.addTimetableEntry(entryWithId);
 
       // 3. If an active semester exists, generate sessions from today forward
       final semester = await _repo.getActiveSemester();
       int sessions = 0;
       if (semester != null) {
         sessions = await _repo.addSessionsForEntry(
-          entry: entry,
+          entry: entryWithId,
           subjectId: subjectId,
           semester: semester,
           fromDate: DateTime.now(),
@@ -122,7 +123,8 @@ class ManualTimetableNotifier extends _$ManualTimetableNotifier {
     try {
       await _repo.deleteTimetableEntry(
         entry.id!,
-        subjectName: entry.subject,
+        subjectId: entry.subjectId, // preferred: rename-safe via subjectId
+        subjectName: entry.subject,  // fallback: for legacy entries without subjectId
         day: entry.day,
         startTime: entry.startTime,
         deleteFutureSessions: deleteFutureSessions,
@@ -137,6 +139,7 @@ class ManualTimetableNotifier extends _$ManualTimetableNotifier {
   /// Returns the count of future notMarked sessions for the given entry.
   Future<int> countFutureSessions(TimetableEntry entry) =>
       _repo.countFutureSessionsForEntry(
+        subjectId: entry.subjectId,
         subjectName: entry.subject,
         day: entry.day,
         startTime: entry.startTime,

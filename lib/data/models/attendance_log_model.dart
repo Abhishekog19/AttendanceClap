@@ -29,6 +29,11 @@ class AttendanceLogModel extends Equatable {
   /// May be null on logs created before this field was added.
   final String? sessionId;
 
+  /// Soft-archive flag set by SubjectCascadeService when a subject is deleted.
+  /// Null on all logs created before this field was added — treated as false.
+  /// Archived logs are excluded from History and Analytics but preserved for audit.
+  final bool? isArchived;
+
   const AttendanceLogModel({
     required this.id,
     required this.subjectId,
@@ -38,6 +43,7 @@ class AttendanceLogModel extends Equatable {
     this.startTime,
     this.endTime,
     this.sessionId,
+    this.isArchived,
   });
 
   factory AttendanceLogModel.fromJson(Map<String, dynamic> json, String docId) {
@@ -53,6 +59,7 @@ class AttendanceLogModel extends Equatable {
       startTime: json['startTime'] as String?,
       endTime: json['endTime'] as String?,
       sessionId: json['sessionId'] as String?,
+      isArchived: json['isArchived'] as bool?, // null on old logs = not archived
     );
   }
 
@@ -64,6 +71,7 @@ class AttendanceLogModel extends Equatable {
         if (startTime != null) 'startTime': startTime,
         if (endTime != null) 'endTime': endTime,
         if (sessionId != null) 'sessionId': sessionId,
+        if (isArchived == true) 'isArchived': true, // only write when true; keeps new docs clean
       };
 
   AttendanceLogModel copyWith({
@@ -74,6 +82,7 @@ class AttendanceLogModel extends Equatable {
     String? startTime,
     String? endTime,
     String? sessionId,
+    bool? isArchived,
   }) =>
       AttendanceLogModel(
         id: id,
@@ -84,9 +93,10 @@ class AttendanceLogModel extends Equatable {
         startTime: startTime ?? this.startTime,
         endTime: endTime ?? this.endTime,
         sessionId: sessionId ?? this.sessionId,
+        isArchived: isArchived ?? this.isArchived,
       );
 
   @override
   List<Object?> get props =>
-      [id, subjectId, subjectName, status, date, startTime, endTime, sessionId];
+      [id, subjectId, subjectName, status, date, startTime, endTime, sessionId, isArchived];
 }

@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../attendance/providers/attendance_history_provider.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 import '../providers/analytics_provider.dart';
 
@@ -22,7 +23,8 @@ class AnalyticsScreen extends ConsumerWidget {
     final onSurfaceVariant =
         isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
 
-    final logsAsync = ref.watch(analyticsLogsStreamProvider);
+    // TASK 7: Use the single canonical stream (no duplicate Firestore listener).
+    final logsAsync = ref.watch(attendanceLogsStreamProvider);
     final summary = ref.watch(analyticsSummaryProvider);
     final insights = ref.watch(analyticsInsightsProvider);
     final period = ref.watch(analyticsPeriodNotifierProvider);
@@ -59,7 +61,7 @@ class AnalyticsScreen extends ConsumerWidget {
               const SizedBox(height: AppSpacing.sm),
               FilledButton.icon(
                 onPressed: () =>
-                    ref.invalidate(analyticsLogsStreamProvider),
+                    ref.invalidate(attendanceLogsStreamProvider),
                 icon: const Icon(Icons.refresh),
                 label: const Text('Retry'),
               ),

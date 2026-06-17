@@ -4,7 +4,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../data/models/attendance_log_model.dart';
 import '../../../data/models/subject_model.dart';
-import '../../../data/repositories/attendance_repository.dart';
+import '../../attendance/providers/attendance_history_provider.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 
 part 'analytics_provider.g.dart';
@@ -83,18 +83,25 @@ class AnalyticsPeriodNotifier extends _$AnalyticsPeriodNotifier {
   void set(AnalyticsPeriod period) => state = period;
 }
 
-// ── Raw logs for analytics (separate from history to avoid interference) ──────
-
-@riverpod
-Stream<List<AttendanceLogModel>> analyticsLogsStream(Ref ref) =>
-    ref.watch(attendanceRepositoryProvider).watchAllLogs();
+// ── TASK 7: DUPLICATE STREAM REMOVED ─────────────────────────────────────────
+//
+// The former `analyticsLogsStream` provider has been deleted.
+// It called `ref.watch(attendanceRepositoryProvider).watchAllLogs()` — which
+// created a SECOND independent Firestore listener on the same attendance_logs
+// collection, running in parallel with `attendanceLogsStreamProvider`.
+//
+// All analytics providers now watch `attendanceLogsStreamProvider` from
+// attendance_history_provider.dart — a single, Riverpod-cached listener that
+// all consumers share. This halves the number of Firestore reads and ensures
+// analytics and history always see identical data.
 
 // ── Trend data (FlSpot list) ──────────────────────────────────────────────────
 
 @riverpod
 List<FlSpot> trendData(Ref ref) {
   final period = ref.watch(analyticsPeriodNotifierProvider);
-  final logsAsync = ref.watch(analyticsLogsStreamProvider);
+  // TASK 7: Use the single canonical logs stream (not a new separate listener).
+  final logsAsync = ref.watch(attendanceLogsStreamProvider);
   final logs = logsAsync.valueOrNull ?? [];
 
   return _buildTrendSpots(logs, period);
@@ -168,7 +175,7 @@ List<FlSpot> _buildTrendSpots(
 
 @riverpod
 Map<String, int> heatmapData(Ref ref) {
-  final logsAsync = ref.watch(analyticsLogsStreamProvider);
+  final logsAsync = ref.watch(attendanceLogsStreamProvider); // TASK 7
   final logs = logsAsync.valueOrNull ?? [];
 
   final map = <String, int>{};
@@ -185,7 +192,7 @@ Map<String, int> heatmapData(Ref ref) {
 @riverpod
 AnalyticsSummary analyticsSummary(Ref ref) {
   final dashAsync = ref.watch(dashboardNotifierProvider);
-  final logsAsync = ref.watch(analyticsLogsStreamProvider);
+  final logsAsync = ref.watch(attendanceLogsStreamProvider); // TASK 7
 
   final data = dashAsync.valueOrNull;
   final logs = logsAsync.valueOrNull ?? [];
@@ -214,7 +221,7 @@ AnalyticsSummary analyticsSummary(Ref ref) {
 @riverpod
 List<AnalyticsInsight> analyticsInsights(Ref ref) {
   final dashAsync = ref.watch(dashboardNotifierProvider);
-  final logsAsync = ref.watch(analyticsLogsStreamProvider);
+  final logsAsync = ref.watch(attendanceLogsStreamProvider); // TASK 7
 
   final subjects = dashAsync.valueOrNull?.subjects ?? [];
   final goal = dashAsync.valueOrNull?.attendanceGoal ?? 75;
