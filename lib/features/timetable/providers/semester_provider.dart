@@ -132,12 +132,12 @@ class SemesterNotifier extends _$SemesterNotifier {
       // 1. Save semester config
       await repo.saveSemester(semester);
 
-      // 2. Save timetable entries (ensures Firestore is consistent)
-      await repo.saveTimetable(effectiveEntries);
-
-      // 3. Auto-create subjects
+      // 2. Auto-create subjects FIRST — we need the name→id map before saving entries
       final subjectIdMap =
           await repo.createSubjectsFromTimetable(effectiveEntries);
+
+      // 3. Save timetable entries with subjectId embedded (TASK 1)
+      await repo.saveTimetable(effectiveEntries, subjectIdMap);
 
       // 4. Clear existing sessions first to prevent duplicates on re-runs
       await repo.deleteAllSessions();

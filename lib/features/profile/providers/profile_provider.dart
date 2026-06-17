@@ -9,11 +9,23 @@ import '../../../data/repositories/auth_repository.dart';
 
 part 'profile_provider.g.dart';
 
+// ── TASK 8: User Profile Stream ──────────────────────────────────────────────
+//
+// userProfileProvider is now a STREAM-backed provider (not one-shot Future).
+// Changes to the user profile document in Firestore (attendance goal, theme,
+// premium status, etc.) propagate INSTANTLY to all watching providers:
+//   • attendanceGoalProvider → Dashboard, Analytics, Notifications
+//   • themeModeProviderProvider → App theme (light/dark/system)
+//   • ProfileNotifier.build() → Profile screen UI
+//
+// The manual ref.invalidate(userProfileProvider) calls in updateGoal() and
+// updateTheme() have been removed — the stream self-updates.
+
 @riverpod
-Future<UserModel?> userProfile(Ref ref) async {
+Stream<UserModel?> userProfile(Ref ref) {
   final uid = ref.watch(currentUserProvider)?.uid;
-  if (uid == null) return null;
-  return ref.watch(firestoreDatasourceProvider).getUserProfile(uid);
+  if (uid == null) return const Stream.empty();
+  return ref.watch(firestoreDatasourceProvider).watchUserProfile(uid);
 }
 
 @riverpod
@@ -37,6 +49,7 @@ ThemeMode themeModeProvider(Ref ref) {
 class ProfileNotifier extends _$ProfileNotifier {
   @override
   AsyncValue<UserModel?> build() {
+    // Watch the stream — updates automatically when Firestore doc changes.
     return ref.watch(userProfileProvider);
   }
 
@@ -49,7 +62,7 @@ class ProfileNotifier extends _$ProfileNotifier {
     // Also save locally for offline access
     final cache = await ref.read(localCacheDatasourceProvider.future);
     await cache.saveAttendanceGoal(goal);
-    ref.invalidate(userProfileProvider);
+    // No ref.invalidate() needed — stream auto-updates from Firestore.
   }
 
   Future<void> updateTheme(String mode) async {
@@ -60,7 +73,7 @@ class ProfileNotifier extends _$ProfileNotifier {
     });
     final cache = await ref.read(localCacheDatasourceProvider.future);
     await cache.saveThemeMode(mode);
-    ref.invalidate(userProfileProvider);
+    // No ref.invalidate() needed — stream auto-updates from Firestore.
   }
 
   Future<void> signOut() async {

@@ -6,11 +6,11 @@ part of 'profile_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$userProfileHash() => r'f0f33ab7cc43b644295f1105a61c8e8cd63b3886';
+String _$userProfileHash() => r'759e541229e7715fa3f399d66148904061bd7571';
 
 /// See also [userProfile].
 @ProviderFor(userProfile)
-final userProfileProvider = AutoDisposeFutureProvider<UserModel?>.internal(
+final userProfileProvider = AutoDisposeStreamProvider<UserModel?>.internal(
   userProfile,
   name: r'userProfileProvider',
   debugGetCreateSourceHash:
@@ -21,7 +21,7 @@ final userProfileProvider = AutoDisposeFutureProvider<UserModel?>.internal(
 
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
-typedef UserProfileRef = AutoDisposeFutureProviderRef<UserModel?>;
+typedef UserProfileRef = AutoDisposeStreamProviderRef<UserModel?>;
 String _$attendanceGoalHash() => r'25e3caa7f834d97aabceaa6490162dbb9b8d99a4';
 
 /// See also [attendanceGoal].
@@ -56,7 +56,7 @@ final themeModeProviderProvider = AutoDisposeProvider<ThemeMode>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef ThemeModeProviderRef = AutoDisposeProviderRef<ThemeMode>;
-String _$profileNotifierHash() => r'7286ebf10e63d444a975cfb67dce74c9de30ed91';
+String _$profileNotifierHash() => r'6b90c2dc0d94987ae4944fc0b6075f8f08f6f576';
 
 /// See also [ProfileNotifier].
 @ProviderFor(ProfileNotifier)

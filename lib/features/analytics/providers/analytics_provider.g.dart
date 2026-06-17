@@ -6,27 +6,7 @@ part of 'analytics_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$analyticsLogsStreamHash() =>
-    r'31313c723737fa033592dd8e4a4047d84801a9fc';
-
-/// See also [analyticsLogsStream].
-@ProviderFor(analyticsLogsStream)
-final analyticsLogsStreamProvider =
-    AutoDisposeStreamProvider<List<AttendanceLogModel>>.internal(
-  analyticsLogsStream,
-  name: r'analyticsLogsStreamProvider',
-  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
-      ? null
-      : _$analyticsLogsStreamHash,
-  dependencies: null,
-  allTransitiveDependencies: null,
-);
-
-@Deprecated('Will be removed in 3.0. Use Ref instead')
-// ignore: unused_element
-typedef AnalyticsLogsStreamRef
-    = AutoDisposeStreamProviderRef<List<AttendanceLogModel>>;
-String _$trendDataHash() => r'97bd2117bbb1f6e189e52069932f5cba06c32a55';
+String _$trendDataHash() => r'3df1ef4992fb8ad1734a6f7de85fb46b3115a657';
 
 /// See also [trendData].
 @ProviderFor(trendData)
@@ -42,7 +22,7 @@ final trendDataProvider = AutoDisposeProvider<List<FlSpot>>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef TrendDataRef = AutoDisposeProviderRef<List<FlSpot>>;
-String _$heatmapDataHash() => r'd57a6a89cde11d3eaa785ceb5323e6223ec91b88';
+String _$heatmapDataHash() => r'b81476b10bb4f91faf4a3b4c037ec731a4e52eee';
 
 /// See also [heatmapData].
 @ProviderFor(heatmapData)
@@ -58,7 +38,7 @@ final heatmapDataProvider = AutoDisposeProvider<Map<String, int>>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef HeatmapDataRef = AutoDisposeProviderRef<Map<String, int>>;
-String _$analyticsSummaryHash() => r'6fe17f75d6b6cddab850922806ee05ce94665355';
+String _$analyticsSummaryHash() => r'7d42a33bb0da4315d50975310ff83607a554d45a';
 
 /// See also [analyticsSummary].
 @ProviderFor(analyticsSummary)
@@ -75,7 +55,7 @@ final analyticsSummaryProvider = AutoDisposeProvider<AnalyticsSummary>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef AnalyticsSummaryRef = AutoDisposeProviderRef<AnalyticsSummary>;
-String _$analyticsInsightsHash() => r'a5e3565a546a15280c522d0e382e01ba9c3648a7';
+String _$analyticsInsightsHash() => r'509d432205c5fa2ed689d7e253cb81dc94f98b2c';
 
 /// See also [analyticsInsights].
 @ProviderFor(analyticsInsights)

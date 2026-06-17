@@ -71,8 +71,14 @@ class TimetableRepository {
   }
 
   // ── Save raw timetable entries (bulk — used by OCR pipeline) ─────────────
+  //
+  // TASK 1: Entries are now saved with subjectId embedded.
+  // subjectIdMap (name → id) is built by createSubjectsFromTimetable and passed here.
 
-  Future<void> saveTimetable(List<TimetableEntry> entries) async {
+  Future<void> saveTimetable(
+    List<TimetableEntry> entries,
+    Map<String, String> subjectIdMap,
+  ) async {
     final batch = _firestore.batch();
 
     // Clear existing
@@ -81,10 +87,14 @@ class TimetableRepository {
       batch.delete(doc.reference);
     }
 
-    // Write new
+    // Write new entries with subjectId embedded
     for (final entry in entries) {
       final ref = _entriesCol.doc(_uuid.v4());
-      batch.set(ref, entry.toMap());
+      final resolvedId = subjectIdMap[entry.subject];
+      batch.set(ref, {
+        ...entry.toMap(),
+        if (resolvedId != null) 'subjectId': resolvedId,
+      });
     }
 
     await batch.commit();
@@ -105,8 +115,11 @@ class TimetableRepository {
   }
 
   /// Deletes a single entry and optionally cascades to future sessions.
+  /// TASK 1: Now uses subjectId for session lookup (falls back to subjectName
+  /// for legacy entries that predate the subjectId field).
   Future<void> deleteTimetableEntry(
     String id, {
+    String? subjectId,
     String? subjectName,
     String? day,
     String? startTime,
@@ -116,31 +129,42 @@ class TimetableRepository {
     await _entriesCol.doc(id).delete();
 
     // Cascade to future notMarked sessions
-    if (deleteFutureSessions &&
-        subjectName != null &&
-        day != null &&
-        startTime != null) {
-      await _deleteFutureSessionsForEntry(
-          subjectName: subjectName, day: day, startTime: startTime);
+    if (deleteFutureSessions && day != null && startTime != null) {
+      if (subjectId != null) {
+        // Preferred: use subjectId (precise, rename-safe)
+        await _deleteFutureSessionsById(
+            subjectId: subjectId, day: day, startTime: startTime);
+      } else if (subjectName != null) {
+        // Legacy fallback: use subjectName (only for old entries without subjectId)
+        await _deleteFutureSessionsByName(
+            subjectName: subjectName, day: day, startTime: startTime);
+      }
     }
   }
 
-  /// Returns the count of upcoming notMarked sessions that match an entry,
-  /// so the UI can warn the user before deletion.
+  /// Returns the count of upcoming notMarked sessions that match an entry.
+  /// TASK 1: Prefers subjectId lookup; falls back to subjectName for old entries.
   Future<int> countFutureSessionsForEntry({
-    required String subjectName,
+    String? subjectId,
+    String? subjectName,
     required String day,
     required String startTime,
   }) async {
     final now = Timestamp.fromDate(DateTime.now());
     final weekday = _weekdayNumber(day);
 
-    final snap = await _sessionsCol
-        .where('subjectName', isEqualTo: subjectName)
+    Query<Map<String, dynamic>> query = _sessionsCol
         .where('startTime', isEqualTo: startTime)
         .where('status', isEqualTo: 'notMarked')
-        .where('date', isGreaterThanOrEqualTo: now)
-        .get();
+        .where('date', isGreaterThanOrEqualTo: now);
+
+    if (subjectId != null) {
+      query = query.where('subjectId', isEqualTo: subjectId);
+    } else if (subjectName != null) {
+      query = query.where('subjectName', isEqualTo: subjectName);
+    }
+
+    final snap = await query.get();
 
     return snap.docs.where((d) {
       final date = (d.data()['date'] as Timestamp).toDate();
@@ -165,6 +189,9 @@ class TimetableRepository {
   }
 
   // ── Auto-create subjects from timetable ───────────────────────────────────
+  //
+  // TASK 1: Returns the name→id map. Caller (OCR pipeline / review screen)
+  // passes this map to saveTimetable() so entries are saved with subjectId.
 
   Future<Map<String, String>> createSubjectsFromTimetable(
     List<TimetableEntry> entries,
@@ -277,8 +304,6 @@ class TimetableRepository {
   // ── Delete all class sessions (used before re-generating) ────────────────
 
   /// Wipes the entire class_sessions collection for this user.
-  /// Call this before calling [saveClassSessions] on a re-generate to
-  /// prevent duplicate sessions.
   Future<void> deleteAllSessions() async {
     const batchSize = 500;
     QuerySnapshot<Map<String, dynamic>> snap;
@@ -294,7 +319,6 @@ class TimetableRepository {
   }
 
   /// Generates sessions for a single entry from [fromDate] to semester end.
-  /// Used when manually adding a class to an active semester.
   Future<int> addSessionsForEntry({
     required TimetableEntry entry,
     required String subjectId,
@@ -361,8 +385,11 @@ class TimetableRepository {
             snap.docs.map((d) => ClassSession.fromMap(d.data())).toList());
   }
 
-  /// Upcoming sessions for a specific subject (from today onwards), max 10.
-  /// Filters and sorts client-side to avoid requiring a composite Firestore index.
+  /// TASK 10: Upcoming sessions for a specific subject — Firestore-side date filter.
+  /// Previously read ALL sessions for a subject (full collection scan) and filtered
+  /// client-side. Now pushes the date >= today filter into Firestore and limits to 10.
+  ///
+  /// Requires Firestore composite index: class_sessions (subjectId ASC, date ASC).
   Stream<List<ClassSession>> upcomingSessionsForSubject(String subjectId) {
     final startOfToday = DateTime(
       DateTime.now().year,
@@ -372,27 +399,16 @@ class TimetableRepository {
 
     return _sessionsCol
         .where('subjectId', isEqualTo: subjectId)
+        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
+        .orderBy('date')
+        .limit(10)
         .snapshots()
-        .map((snap) {
-      final all = snap.docs
-          .map((d) => ClassSession.fromMap(d.data()))
-          .toList();
-      final upcoming = all
-          .where((s) => !s.date.isBefore(startOfToday))
-          .toList()
-        ..sort((a, b) => a.date.compareTo(b.date));
-      return upcoming.take(10).toList();
-    });
+        .map((snap) =>
+            snap.docs.map((d) => ClassSession.fromMap(d.data())).toList());
   }
 
-  // ── Mark attendance on a session (CORRECT VERSION) ────────────────────────
+  // ── Mark attendance on a session ──────────────────────────────────────────
 
-  /// Marks attendance for a session. Handles:
-  /// 1. Creating a new log + updating subject counters (first mark)
-  /// 2. Updating existing log + applying counter delta (re-mark)
-  /// 3. Duplicate prevention (only one log per session)
-  ///
-  /// [session] must have the correct display subject (override-aware).
   Future<void> markSessionAttendance({
     required ClassSession session,
     required AttendanceStatus status,
@@ -429,17 +445,106 @@ class TimetableRepository {
     await _sessionsCol.doc(session.id).update({'status': status.name});
   }
 
-  /// Marks multiple sessions absent in batch. Used by "Mark Remaining Absent"
-  /// and "Mark Full Day Absent" features.
+  /// TASK 11: Marks multiple sessions absent with batch fetch + batch write.
+  /// Previously: N individual reads + N individual batch writes = 2N serial ops.
+  /// Now: 1 batch read (chunked IN query) + 1-2 batch writes per chunk.
   Future<void> markMultipleSessionsAbsent(List<ClassSession> sessions) async {
-    for (final session in sessions) {
-      // Skip already-marked and cancelled sessions
-      if (session.status != AttendanceStatus.notMarked) continue;
-      if (session.isCancelled) continue;
-      await markSessionAttendance(
-        session: session,
-        status: AttendanceStatus.absent,
-      );
+    // Filter to only unmarked, non-cancelled sessions
+    final toMark = sessions
+        .where((s) =>
+            s.status == AttendanceStatus.notMarked && !s.isCancelled)
+        .toList();
+
+    if (toMark.isEmpty) return;
+
+    final sessionIds = toMark.map((s) => s.id).toList();
+
+    // Step 1: Batch lookup all existing logs in one query (chunked at 30)
+    final existingLogsMap = await _ds.getLogsForSessions(_uid, sessionIds);
+
+    // Step 2: Build all write operations
+    final now = DateTime.now();
+    const chunkSize = 400; // Stay well under 500 batch limit (each session = 2 writes)
+
+    for (int i = 0; i < toMark.length; i += chunkSize) {
+      final chunk = toMark.skip(i).take(chunkSize).toList();
+      final batch = _firestore.batch();
+
+      for (final session in chunk) {
+        final existing = existingLogsMap[session.id];
+
+        if (existing == null) {
+          // New log: set attendance_logs doc + increment subject counter
+          final logId = _uuid.v4();
+          final logsRef = _firestore
+              .collection('users')
+              .doc(_uid)
+              .collection('attendance_logs')
+              .doc(logId);
+          batch.set(logsRef, AttendanceLogModel(
+            id: logId,
+            subjectId: session.displaySubjectId,
+            subjectName: session.displaySubjectName,
+            status: AttendanceStatus.absent,
+            date: session.date,
+            startTime: session.displayStartTime,
+            endTime: session.displayEndTime,
+            sessionId: session.id,
+          ).toJson());
+
+          // Update subject counter: totalClasses++
+          final subjectRef = _firestore
+              .collection('users')
+              .doc(_uid)
+              .collection('subjects')
+              .doc(session.displaySubjectId);
+          batch.update(subjectRef, {
+            'totalClasses': FieldValue.increment(1),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } else {
+          // Existing log: update status + apply counter delta
+          final oldStatus = existing.status;
+          final updatedLog = existing.copyWith(status: AttendanceStatus.absent);
+
+          final logsRef = _firestore
+              .collection('users')
+              .doc(_uid)
+              .collection('attendance_logs')
+              .doc(existing.id);
+          batch.set(logsRef, updatedLog.toJson());
+
+          // Apply counter delta for status change
+          final delta = FirestoreDatasource.counterDeltaPublic(
+              oldStatus: oldStatus, newStatus: AttendanceStatus.absent);
+          if (delta['attendedClasses'] != 0 || delta['totalClasses'] != 0) {
+            final subjectRef = _firestore
+                .collection('users')
+                .doc(_uid)
+                .collection('subjects')
+                .doc(session.displaySubjectId);
+            final update = <String, dynamic>{
+              'updatedAt': FieldValue.serverTimestamp(),
+            };
+            if (delta['attendedClasses'] != 0) {
+              update['attendedClasses'] =
+                  FieldValue.increment(delta['attendedClasses']!);
+            }
+            if (delta['totalClasses'] != 0) {
+              update['totalClasses'] =
+                  FieldValue.increment(delta['totalClasses']!);
+            }
+            batch.update(subjectRef, update);
+          }
+        }
+
+        // Always update the session status to 'absent'
+        batch.update(_sessionsCol.doc(session.id), {
+          'status': AttendanceStatus.absent.name,
+        });
+      }
+
+      await batch.commit();
     }
   }
 
@@ -473,7 +578,43 @@ class TimetableRepository {
 
   // ── Private helpers ───────────────────────────────────────────────────────
 
-  Future<void> _deleteFutureSessionsForEntry({
+  /// TASK 1: Deletes future sessions by subjectId (preferred — rename-safe).
+  Future<void> _deleteFutureSessionsById({
+    required String subjectId,
+    required String day,
+    required String startTime,
+  }) async {
+    final now = Timestamp.fromDate(DateTime.now());
+    final weekday = _weekdayNumber(day);
+
+    final snap = await _sessionsCol
+        .where('subjectId', isEqualTo: subjectId)
+        .where('startTime', isEqualTo: startTime)
+        .where('status', isEqualTo: 'notMarked')
+        .where('date', isGreaterThanOrEqualTo: now)
+        .get();
+
+    final toDelete = snap.docs.where((d) {
+      final date = (d.data()['date'] as Timestamp).toDate();
+      return date.weekday == weekday;
+    }).toList();
+
+    if (toDelete.isEmpty) return;
+
+    const chunkSize = 500;
+    for (int i = 0; i < toDelete.length; i += chunkSize) {
+      final chunk = toDelete.skip(i).take(chunkSize).toList();
+      final batch = _firestore.batch();
+      for (final d in chunk) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    }
+  }
+
+  /// Legacy fallback: delete future sessions by subjectName.
+  /// Only used for timetable entries created before the subjectId field was added.
+  Future<void> _deleteFutureSessionsByName({
     required String subjectName,
     required String day,
     required String startTime,

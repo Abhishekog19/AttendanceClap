@@ -27,7 +27,7 @@ final timetableEntriesStreamProvider =
 typedef TimetableEntriesStreamRef
     = AutoDisposeStreamProviderRef<List<TimetableEntry>>;
 String _$manualTimetableNotifierHash() =>
-    r'91904b2799eefae696b8e8ec813aa86d9bf4b6c9';
+    r'd37331cc52fa6a45f0f11a9558a4fa0c06facec4';
 
 /// See also [ManualTimetableNotifier].
 @ProviderFor(ManualTimetableNotifier)
