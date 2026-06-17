@@ -58,14 +58,20 @@ class SubjectRepository {
   ///
   /// TASK 2: Rename propagation via [SubjectCascadeService.propagateRename].
   Future<void> updateSubject(SubjectModel updated) async {
-    // Fetch the current name BEFORE writing the update
+    // Fetch the current subject BEFORE writing the update
     final existing = await _db.getSubjectById(_uid, updated.id);
 
     await _db.updateSubject(_uid, updated.copyWith(updatedAt: DateTime.now()));
 
-    // If the name changed, propagate to all dependent collections
+    // If the name changed, propagate to all dependent collections.
+    // Pass BOTH the old name (for legacy rows without subjectId) and new name.
     if (existing != null && existing.name != updated.name) {
-      await _cascade.propagateRename(_uid, updated.id, updated.name);
+      await _cascade.propagateRename(
+        _uid,
+        updated.id,
+        oldName: existing.name,
+        newName: updated.name,
+      );
     }
   }
 
@@ -75,8 +81,11 @@ class SubjectRepository {
   /// Cascade runs BEFORE the subject document is deleted so the subject
   /// can still be referenced during the cascade queries.
   Future<void> deleteSubject(String subjectId) async {
+    // Fetch name before deletion so cascade can match legacy entries by name
+    final subject = await _db.getSubjectById(_uid, subjectId);
+
     // Run cascade first (removes sessions, archives logs, removes entries/overrides)
-    await _cascade.cascadeDelete(_uid, subjectId);
+    await _cascade.cascadeDelete(_uid, subjectId, subjectName: subject?.name);
 
     // Then delete the source-of-truth subject document
     await _db.deleteSubject(_uid, subjectId);

@@ -150,13 +150,15 @@ class TimetableRepository {
     required String day,
     required String startTime,
   }) async {
-    final now = Timestamp.fromDate(DateTime.now());
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    final startTimestamp = Timestamp.fromDate(startOfToday);
     final weekday = _weekdayNumber(day);
 
     Query<Map<String, dynamic>> query = _sessionsCol
         .where('startTime', isEqualTo: startTime)
         .where('status', isEqualTo: 'notMarked')
-        .where('date', isGreaterThanOrEqualTo: now);
+        .where('date', isGreaterThanOrEqualTo: startTimestamp);
 
     if (subjectId != null) {
       query = query.where('subjectId', isEqualTo: subjectId);
@@ -584,14 +586,16 @@ class TimetableRepository {
     required String day,
     required String startTime,
   }) async {
-    final now = Timestamp.fromDate(DateTime.now());
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    final startTimestamp = Timestamp.fromDate(startOfToday);
     final weekday = _weekdayNumber(day);
 
     final snap = await _sessionsCol
         .where('subjectId', isEqualTo: subjectId)
         .where('startTime', isEqualTo: startTime)
         .where('status', isEqualTo: 'notMarked')
-        .where('date', isGreaterThanOrEqualTo: now)
+        .where('date', isGreaterThanOrEqualTo: startTimestamp)
         .get();
 
     final toDelete = snap.docs.where((d) {
@@ -619,14 +623,16 @@ class TimetableRepository {
     required String day,
     required String startTime,
   }) async {
-    final now = Timestamp.fromDate(DateTime.now());
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    final startTimestamp = Timestamp.fromDate(startOfToday);
     final weekday = _weekdayNumber(day);
 
     final snap = await _sessionsCol
         .where('subjectName', isEqualTo: subjectName)
         .where('startTime', isEqualTo: startTime)
         .where('status', isEqualTo: 'notMarked')
-        .where('date', isGreaterThanOrEqualTo: now)
+        .where('date', isGreaterThanOrEqualTo: startTimestamp)
         .get();
 
     final toDelete = snap.docs.where((d) {

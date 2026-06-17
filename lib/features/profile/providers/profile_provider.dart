@@ -24,7 +24,7 @@ part 'profile_provider.g.dart';
 @riverpod
 Stream<UserModel?> userProfile(Ref ref) {
   final uid = ref.watch(currentUserProvider)?.uid;
-  if (uid == null) return const Stream.empty();
+  if (uid == null) return Stream.value(null);
   return ref.watch(firestoreDatasourceProvider).watchUserProfile(uid);
 }
 

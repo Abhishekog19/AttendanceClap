@@ -152,26 +152,28 @@ class FirestoreDatasource {
 
   /// Stream of all active (non-archived) logs, most recent first (capped at 500).
   /// TASK 3: Excludes soft-archived logs (created by subject delete cascade).
-  /// TASK 7: This is the SINGLE canonical stream — analyticsLogsStream now
-  ///         delegates to this via attendanceLogsStreamProvider (no duplicate listener).
+  /// TASK 7: This is the SINGLE canonical stream — no duplicate Firestore listener.
   ///
-  /// BUG FIX: isArchived is filtered client-side (not in Firestore WHERE clause).
-  /// Reason: Firestore's `isNotEqualTo` excludes documents where the field is absent.
-  /// Existing logs created before the sprint have no isArchived field, so they
-  /// were all excluded. Client-side filter treats absent field as false (not archived).
+  /// NOTE: isArchived is filtered CLIENT-SIDE intentionally.
+  /// • Firestore's `isNotEqualTo: true` excludes documents where the field is absent
+  ///   (all legacy logs have no isArchived field → they would all be excluded).
+  /// • Firestore Flutter SDK throws an assertion error if null appears in whereIn list
+  ///   (whereIn: [null, false] fails at query.dart line 738).
+  /// • Client-side: `log.isArchived != true` treats null/absent as active — correct.
+  /// • limit(600) provides buffer in case a small number of archived logs slip through.
   Stream<List<AttendanceLogModel>> watchAttendanceLogs(String uid) {
     return _logsRef(uid)
         .orderBy('date', descending: true)
-        .limit(500)
+        .limit(600) // buffer: client-side filter reduces to ~500 active logs
         .snapshots()
         .map((snap) => snap.docs
             .map((doc) => AttendanceLogModel.fromJson(doc.data(), doc.id))
-            .where((log) => log.isArchived != true) // client-side: absent field = not archived
+            .where((log) => log.isArchived != true)
             .toList());
   }
 
   /// Stream of active logs for a single subject, most recent first.
-  /// Excludes archived logs client-side (see watchAttendanceLogs comment for why).
+  /// isArchived filtered client-side (see watchAttendanceLogs comment for why).
   Stream<List<AttendanceLogModel>> watchLogsForSubject(
       String uid, String subjectId) {
     return _logsRef(uid)
@@ -180,9 +182,9 @@ class FirestoreDatasource {
         .map((snap) {
       final logs = snap.docs
           .map((doc) => AttendanceLogModel.fromJson(doc.data(), doc.id))
-          .where((log) => log.isArchived != true) // client-side archive filter
+          .where((log) => log.isArchived != true)
           .toList();
-      logs.sort((a, b) => b.date.compareTo(a.date)); // most recent first
+      logs.sort((a, b) => b.date.compareTo(a.date));
       return logs;
     });
   }
@@ -327,9 +329,9 @@ class FirestoreDatasource {
         .get();
     final logs = snap.docs
         .map((doc) => AttendanceLogModel.fromJson(doc.data(), doc.id))
-        .where((log) => log.isArchived != true) // client-side archive filter
+        .where((log) => log.isArchived != true)
         .toList();
-    logs.sort((a, b) => b.date.compareTo(a.date)); // most recent first
+    logs.sort((a, b) => b.date.compareTo(a.date));
     return logs;
   }
 
@@ -342,7 +344,7 @@ class FirestoreDatasource {
         .get();
     return snap.docs
         .map((doc) => AttendanceLogModel.fromJson(doc.data(), doc.id))
-        .where((log) => log.isArchived != true) // client-side archive filter
+        .where((log) => log.isArchived != true)
         .toList();
   }
 
