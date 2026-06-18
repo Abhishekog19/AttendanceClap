@@ -50,7 +50,7 @@ class AuthErrorMapper {
       'email-already-in-use' =>
         'An account already exists with this email.',
       'weak-password' =>
-        'Password must be at least 8 characters and contain a number.',
+        'Password must be at least 8 characters with uppercase, lowercase, and a number.',
       'operation-not-allowed' =>
         'This sign-in method is not enabled. Please contact support.',
 

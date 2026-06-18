@@ -129,10 +129,10 @@ class HistoricalSyncService {
       final batch = _firestore.batch();
 
       for (final entry in chunk) {
-        batch.update(subjectsCol.doc(entry.key), {
+        batch.set(subjectsCol.doc(entry.key), {
           'totalClasses': entry.value,
           'updatedAt': FieldValue.serverTimestamp(),
-        });
+        }, SetOptions(merge: true));
       }
 
       await batch.commit();
