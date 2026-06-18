@@ -14,7 +14,7 @@ class MainShell extends StatelessWidget {
     _NavTab(icon: Icons.home_outlined, activeIcon: Icons.home, label: 'Home', path: '/dashboard'),
     _NavTab(icon: Icons.calendar_today_outlined, activeIcon: Icons.calendar_today, label: 'Schedule', path: '/timetable'),
     _NavTab(icon: Icons.query_stats_outlined, activeIcon: Icons.query_stats, label: 'Predictor', path: '/predictor'),
-    _NavTab(icon: Icons.leaderboard_outlined, activeIcon: Icons.leaderboard, label: 'Analytics', path: '/analytics'),
+    // _NavTab(icon: Icons.leaderboard_outlined, activeIcon: Icons.leaderboard, label: 'Analytics', path: '/analytics'),
     _NavTab(icon: Icons.person_outline, activeIcon: Icons.person, label: 'Profile', path: '/profile'),
   ];
 

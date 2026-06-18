@@ -84,11 +84,11 @@ GoRouter appRouter(Ref ref) {
             name: 'predictor',
             builder: (context, state) => const PredictorScreen(),
           ),
-          GoRoute(
-            path: '/analytics',
-            name: 'analytics',
-            builder: (context, state) => const AnalyticsScreen(),
-          ),
+          // GoRoute(
+          //   path: '/analytics',
+          //   name: 'analytics',
+          //   builder: (context, state) => const AnalyticsScreen(),
+          // ),
           GoRoute(
             path: '/profile',
             name: 'profile',
