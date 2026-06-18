@@ -56,7 +56,7 @@ final themeModeProviderProvider = AutoDisposeProvider<ThemeMode>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef ThemeModeProviderRef = AutoDisposeProviderRef<ThemeMode>;
-String _$profileNotifierHash() => r'728321d9560c49f08dcb36e7bf65f287ab9f1cca';
+String _$profileNotifierHash() => r'708990fc3da2528f723e50aaf012b0729b734e3b';
 
 /// See also [ProfileNotifier].
 @ProviderFor(ProfileNotifier)

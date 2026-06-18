@@ -11,10 +11,16 @@ import '../models/daily_schedule_override_model.dart';
 import '../models/semester_model.dart';
 import '../models/timetable_entry_model.dart';
 
+import 'auth_repository.dart';
+
 part 'timetable_repository.g.dart';
 
 @riverpod
 TimetableRepository timetableRepository(Ref ref) {
+  // Watch currentUserProvider so this repository is rebuilt when the user changes.
+  // Without this, the old repository instance (with Account A's uid) would be
+  // reused when Account B logs in.
+  ref.watch(currentUserProvider);
   return TimetableRepository(
     firestore: FirebaseFirestore.instance,
     auth: FirebaseAuth.instance,

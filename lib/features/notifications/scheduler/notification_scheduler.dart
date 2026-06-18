@@ -125,14 +125,19 @@ class NotificationScheduler {
       final isFirst = session == unmarked.first;
       final id = stableNotificationId('reminder_${session.id}_$dateKey') + 10000;
 
+      // N5 FIX: Use consistent title+body pairs for first vs non-first class.
+      // Before: both used the same body text; first-class title was misleading.
+      final title = isFirst
+          ? '📚 First class today'
+          : '📚 ${session.displaySubjectName}';
+      final body = isFirst
+          ? '${session.displaySubjectName} starts in ${prefs.reminderMinutes} min'
+          : 'Starts in ${prefs.reminderMinutes} min';
+
       await _svc.scheduleOnce(
         id: id,
-        title: isFirst
-            ? '📚 First class today'
-            : '📚 ${session.displaySubjectName}',
-        body: isFirst
-            ? '${session.displaySubjectName} starts in ${prefs.reminderMinutes} minutes.'
-            : '${session.displaySubjectName} starts in ${prefs.reminderMinutes} minutes.',
+        title: title,
+        body: body,
         scheduledDate: tz.TZDateTime.from(reminderTime, tz.local),
         channelId: NotificationChannels.classReminders,
         channelName: 'Class Reminders',
@@ -295,6 +300,14 @@ class NotificationScheduler {
       bigText: true,
     );
 
+    // N1 FIX: Record the dedup flag BEFORE writing the notification.
+    // Previously the flag was set AFTER the write, so two concurrent scheduler
+    // calls could both pass the hasWarningFiredToday() check before either set
+    // the flag — resulting in duplicate Firestore notification documents.
+    // Setting it first ensures idempotency: if a second call runs before the
+    // first finishes, it will see the flag already set and skip.
+    await repo.recordDailyWarningFired();
+
     // Record in Firestore notification center (if repo provided)
     if (notificationRepo != null) {
       final centerId = 'attendanceWarning_$dateKey';
@@ -311,8 +324,6 @@ class NotificationScheduler {
       }
     }
 
-    // Record dedup flag
-    await repo.recordDailyWarningFired();
     // ignore: avoid_print
     print('[NotificationScheduler] Daily warning scheduled for $fireTime — ${lowSubjects.length} subjects.');
   }

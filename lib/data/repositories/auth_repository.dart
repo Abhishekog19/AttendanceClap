@@ -21,9 +21,25 @@ Stream<User?> authStateChanges(Ref ref) {
   return FirebaseAuth.instance.authStateChanges();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// currentUserProvider — THE CRITICAL FIX
+//
+// Previously this was a static snapshot:
+//   return FirebaseAuth.instance.currentUser;  ← captured once, never updated
+//
+// This meant ALL downstream providers (subjectsStreamProvider, userProfileProvider,
+// timetableRepositoryProvider, dashboardNotifier) continued to stream Account A's
+// Firestore data even after switching to Account B, because they all read _uid from
+// this provider.
+//
+// The fix: derive currentUser from the reactive authStateChangesProvider.
+// Now whenever Firebase auth state changes (login OR logout), this provider
+// emits the new user, which cascades to rebuild every dependent provider
+// automatically — no manual ref.invalidate() calls needed.
+// ─────────────────────────────────────────────────────────────────────────────
 @riverpod
 User? currentUser(Ref ref) {
-  return FirebaseAuth.instance.currentUser;
+  return ref.watch(authStateChangesProvider).valueOrNull;
 }
 
 class AuthRepository {

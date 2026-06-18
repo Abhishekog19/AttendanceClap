@@ -60,4 +60,14 @@ class LocalCacheDatasource {
   String getThemeMode() {
     return _prefs.getString(_themeModeKey) ?? 'system';
   }
+
+  // ─── Full cache wipe (called on logout) ──────────────────────────────────────
+
+  /// Clears all user-specific cached data.
+  /// Call this during logout to prevent Account A data leaking into Account B.
+  Future<void> clearAll() async {
+    await _prefs.remove(_subjectsKey);
+    await _prefs.remove(_userGoalKey);
+    await _prefs.remove(_themeModeKey);
+  }
 }

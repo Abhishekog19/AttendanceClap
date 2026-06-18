@@ -37,14 +37,18 @@ class TimetableScreen extends ConsumerStatefulWidget {
 
 class _TimetableScreenState extends ConsumerState<TimetableScreen> {
   Timer? _clockTimer;
-  bool _completedExpanded = false;
 
   @override
   void initState() {
     super.initState();
-    // Tick every minute so current/upcoming buckets re-evaluate
+    // S2 FIX: Invalidate schedulePageDataProvider every minute so time-based
+    // bucket transitions (upcoming → action required → completed) happen
+    // on the clock tick. A plain setState() only rebuilds the widget tree but
+    // schedulePageDataProvider is a Riverpod provider that caches its value
+    // until one of its watched inputs changes — so setState alone was not
+    // enough to move classes between sections.
     _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) setState(() {});
+      if (mounted) ref.invalidate(schedulePageDataProvider);
     });
   }
 
@@ -136,7 +140,17 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                       icon: Icons.edit_calendar_outlined,
                       label: 'Edit Today',
                       isDark: isDark,
-                      onTap: () => _showEditSheet(context, allSessions),
+                      // S3 FIX: Pass override-aware sessions (from schedulePageData)
+                      // instead of raw todayAsync. The raw stream has no overrides
+                      // applied, so the edit sheet could create duplicate overrides
+                      // on top of already-overridden sessions.
+                      onTap: () => _showEditSheet(context, [
+                        if (scheduleData.currentClass != null)
+                          scheduleData.currentClass!,
+                        ...scheduleData.upcoming,
+                        ...scheduleData.actionRequired,
+                        ...scheduleData.completedToday,
+                      ]),
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
@@ -217,46 +231,22 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
               ],
 
               // ─── COMPLETED TODAY ───────────────────────────────────────────
+              // S1 FIX: Completed classes are now ALWAYS visible in compact
+              // inline rows. Previously hidden behind a GestureDetector +
+              // AnimatedCrossFade collapse toggle (_completedExpanded = false).
+              // Users need to see marked classes immediately without extra taps.
               if (scheduleData.completedToday.isNotEmpty) ...[
-                GestureDetector(
-                  onTap: () =>
-                      setState(() => _completedExpanded = !_completedExpanded),
-                  child: Row(
-                    children: [
-                      _SectionHeader(
-                          label: 'COMPLETED TODAY', isDark: isDark),
-                      const Spacer(),
-                      AnimatedRotation(
-                        turns: _completedExpanded ? 0.5 : 0,
-                        duration:
-                            const Duration(milliseconds: 200),
-                        child: Icon(Icons.expand_more,
-                            color: onSurfaceVariant, size: 18),
-                      ),
-                    ],
+                _SectionHeader(label: 'COMPLETED TODAY', isDark: isDark),
+                const SizedBox(height: AppSpacing.sm),
+                ...scheduleData.completedToday.map(
+                  (session) => Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                    child: _CompletedClassTile(
+                        session: session, isDark: isDark),
                   ),
-                ),
-                AnimatedCrossFade(
-                  firstChild: const SizedBox(height: 0),
-                  secondChild: Column(
-                    children: [
-                      const SizedBox(height: AppSpacing.md),
-                      ...scheduleData.completedToday.map(
-                        (session) => Padding(
-                          padding: const EdgeInsets.only(
-                              bottom: AppSpacing.sm),
-                          child: _CompletedClassTile(
-                              session: session, isDark: isDark),
-                        ),
-                      ),
-                    ],
-                  ),
-                  crossFadeState: _completedExpanded
-                      ? CrossFadeState.showSecond
-                      : CrossFadeState.showFirst,
-                  duration: const Duration(milliseconds: 250),
                 ),
               ],
+
             ],
           );
         },

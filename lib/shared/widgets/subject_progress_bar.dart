@@ -39,6 +39,18 @@ class _SubjectProgressBarState extends State<SubjectProgressBar>
   }
 
   @override
+  void didUpdateWidget(SubjectProgressBar old) {
+    super.didUpdateWidget(old);
+    if (old.percentage != widget.percentage) {
+      _widthAnim = Tween<double>(
+        begin: _widthAnim.value, // animate from current position, not 0
+        end: widget.percentage / 100,
+      ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();

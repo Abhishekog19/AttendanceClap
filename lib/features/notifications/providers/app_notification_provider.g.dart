@@ -6,7 +6,7 @@ part of 'app_notification_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$appNotificationsHash() => r'c29b34778f200f8ad8ab5e3e2868b7087d0e7ba8';
+String _$appNotificationsHash() => r'edc0988e7d3676676385771de2749f9138f733fd';
 
 /// See also [appNotifications].
 @ProviderFor(appNotifications)
@@ -26,11 +26,11 @@ final appNotificationsProvider =
 typedef AppNotificationsRef
     = AutoDisposeStreamProviderRef<List<AppNotificationModel>>;
 String _$unreadNotificationCountHash() =>
-    r'9433dc067d4c9caf35fb8597bfededc94186819b';
+    r'7bda1a09b3fd05ba4c472aa971c1e418b72a9f55';
 
 /// See also [unreadNotificationCount].
 @ProviderFor(unreadNotificationCount)
-final unreadNotificationCountProvider = AutoDisposeProvider<int>.internal(
+final unreadNotificationCountProvider = AutoDisposeStreamProvider<int>.internal(
   unreadNotificationCount,
   name: r'unreadNotificationCountProvider',
   debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
@@ -42,9 +42,26 @@ final unreadNotificationCountProvider = AutoDisposeProvider<int>.internal(
 
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
-typedef UnreadNotificationCountRef = AutoDisposeProviderRef<int>;
+typedef UnreadNotificationCountRef = AutoDisposeStreamProviderRef<int>;
+String _$notificationPaginationHash() =>
+    r'41a3d7fca0470a2eded74c60dea826480da72f43';
+
+/// See also [NotificationPagination].
+@ProviderFor(NotificationPagination)
+final notificationPaginationProvider = AutoDisposeNotifierProvider<
+    NotificationPagination, NotificationPageState>.internal(
+  NotificationPagination.new,
+  name: r'notificationPaginationProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$notificationPaginationHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+typedef _$NotificationPagination = AutoDisposeNotifier<NotificationPageState>;
 String _$appNotificationNotifierHash() =>
-    r'ecb7f4a135abb57ac88793e268de912cd02dbc14';
+    r'7427154801430266c7772d42118b5b3188ba6907';
 
 /// See also [AppNotificationNotifier].
 @ProviderFor(AppNotificationNotifier)
