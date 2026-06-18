@@ -82,8 +82,12 @@ class ProfileNotifier extends _$ProfileNotifier {
     try {
       final cache = await ref.read(localCacheDatasourceProvider.future);
       await cache.clearAll();
-    } catch (_) {
-      // Non-fatal — proceed with sign out regardless
+    } catch (e, st) {
+      // Cache-clearing failure is non-fatal — sign out proceeds regardless.
+      // Logged explicitly so stale-cache failures are visible in device logs
+      // and can be investigated rather than silently discarded.
+      // ignore: avoid_print
+      print('[ProfileNotifier] cache.clearAll() failed during sign-out: $e\n$st');
     }
 
     // 2. Sign out from Firebase and Google.

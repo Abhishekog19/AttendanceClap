@@ -101,8 +101,11 @@ class AppNotificationRepository {
       if (snap.docs.isEmpty) break;
 
       for (final doc in snap.docs) {
-        final id = doc.data()['id'] as String?;
-        if (id != null && id.isNotEmpty) ids.add(id);
+        // Use doc.id (Firestore's canonical document ID) rather than reading
+        // 'id' from the data map. The data-layer field could be missing or
+        // stale for partially-written documents, silently skipping records.
+        // doc.id is always present and never empty.
+        ids.add(doc.id);
       }
 
       if (snap.docs.length < 400) break;

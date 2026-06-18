@@ -199,7 +199,10 @@ class _NotificationList extends ConsumerWidget {
       List<AppNotificationModel> notifications) {
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
-    final weekStart = todayStart.subtract(const Duration(days: 6));
+    // Subtract 7 days so weekStart is 7 days strictly before today.
+    // Using 6 days would include today in the "This Week" bucket (7-day window
+    // including today), which contradicts the "last 7 days, not today" spec.
+    final weekStart = todayStart.subtract(const Duration(days: 7));
     final monthStart = DateTime(now.year, now.month, 1);
 
     // Use LinkedHashMap insertion order to preserve display order
