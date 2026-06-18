@@ -197,7 +197,9 @@ class _NotificationBell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final unreadCount = ref.watch(unreadNotificationCountProvider);
+    // unreadNotificationCountProvider is now a Stream<int> — read its current value.
+    final unreadCount =
+        ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
 
     return Stack(
       clipBehavior: Clip.none,
@@ -219,7 +221,8 @@ class _NotificationBell extends ConsumerWidget {
                 decoration: BoxDecoration(
                   color: AppColors.error,
                   shape: unreadCount > 9 ? BoxShape.rectangle : BoxShape.circle,
-                  borderRadius: unreadCount > 9 ? BorderRadius.circular(9) : null,
+                  borderRadius:
+                      unreadCount > 9 ? BorderRadius.circular(9) : null,
                 ),
                 child: Text(
                   unreadCount > 99 ? '99+' : '$unreadCount',

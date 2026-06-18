@@ -95,7 +95,9 @@ class AttendanceStats {
       }
     }
     return AttendanceStats(
-      total: logs.length,
+      // Exclude notMarked entries from total — they have no attendance status
+      // and inflating the denominator would understate the real percentage.
+      total: p + a + l + c,
       present: p,
       absent: a,
       late: l,

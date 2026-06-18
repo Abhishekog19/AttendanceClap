@@ -11,17 +11,15 @@ import '../providers/app_notification_provider.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // NotificationCenterScreen
 //
-// Displays all user notifications grouped by:
+// Displays notifications grouped by:
 //   • Today
-//   • Yesterday
+//   • This Week  (last 7 days, not today)
+//   • This Month (current month, not this week)
 //   • Older
 //
-// Features:
-//   - Mark as read on tap
-//   - Swipe-to-dismiss to delete
-//   - "Mark all as read" action
-//   - Read/unread visual indicator
-//   - Empty state
+// Pagination: initial 20 notifications + "Load more" button.
+// First page is real-time (new notifications appear instantly).
+// Older pages fetched on demand via Firestore cursor pagination.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class NotificationCenterScreen extends ConsumerWidget {
@@ -29,7 +27,12 @@ class NotificationCenterScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final notificationsAsync = ref.watch(appNotificationsProvider);
+    final pageState = ref.watch(notificationPaginationProvider);
+    // N4 FIX: watch the raw stream to distinguish "loading" from "empty".
+    // Previously notifications.isEmpty triggered the empty state while the
+    // stream was still fetching — causing a visible flash of the empty screen.
+    final streamAsync = ref.watch(appNotificationsProvider);
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
     final bg = isDark ? AppColors.darkSurface : AppColors.background;
@@ -37,120 +40,184 @@ class NotificationCenterScreen extends ConsumerWidget {
     final onSurfaceVariant =
         isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
 
+    final notifications = pageState.notifications;
+    // N3 badge display: show ’99+’ when count is at the limit (100)
+    final unreadCount = ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
+    final hasUnread = unreadCount > 0;
+
+    Widget body;
+    if (streamAsync.isLoading && notifications.isEmpty) {
+      // Stream is still fetching — show skeleton, not empty state
+      body = _NotificationLoadingSkeleton(isDark: isDark);
+    } else if (notifications.isEmpty) {
+      body = _EmptyNotificationsState(
+        isDark: isDark,
+        onSurface: onSurface,
+        onSurfaceVariant: onSurfaceVariant,
+      );
+    } else {
+      body = _NotificationList(
+        notifications: notifications,
+        pageState: pageState,
+        isDark: isDark,
+        primary: primary,
+        onSurface: onSurface,
+        onSurfaceVariant: onSurfaceVariant,
+      );
+    }
+
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
         backgroundColor: bg,
+        elevation: 0,
         title: Text(
           'Notifications',
           style: AppTextStyles.headlineMd.copyWith(color: primary),
         ),
         actions: [
-          notificationsAsync.whenOrNull(
-                data: (notifications) {
-                  final hasUnread = notifications.any((n) => !n.isRead);
-                  if (!hasUnread) return const SizedBox.shrink();
-                  return TextButton(
-                    onPressed: () => ref
-                        .read(appNotificationNotifierProvider.notifier)
-                        .markAllAsRead(),
-                    child: Text(
-                      'Mark all read',
-                      style: AppTextStyles.labelMd.copyWith(color: primary),
-                    ),
-                  );
-                },
-              ) ??
-              const SizedBox.shrink(),
+          if (hasUnread)
+            TextButton(
+              onPressed: () =>
+                  ref.read(appNotificationNotifierProvider.notifier).markAllAsRead(),
+              child: Text(
+                unreadCount >= 100
+                    ? 'Mark all read (99+)'
+                    : 'Mark all read ($unreadCount)',
+                style: AppTextStyles.labelMd.copyWith(color: primary),
+              ),
+            ),
         ],
       ),
-      body: notificationsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Text(
-            'Failed to load notifications.',
-            style: AppTextStyles.bodyLg.copyWith(color: AppColors.error),
-          ),
-        ),
-        data: (notifications) {
-          if (notifications.isEmpty) {
-            return _EmptyNotificationsState(
-              isDark: isDark,
-              onSurface: onSurface,
-              onSurfaceVariant: onSurfaceVariant,
+      body: body,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _NotificationList — grouped + paginated list
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _NotificationList extends ConsumerWidget {
+  final List<AppNotificationModel> notifications;
+  final NotificationPageState pageState;
+  final bool isDark;
+  final Color primary;
+  final Color onSurface;
+  final Color onSurfaceVariant;
+
+  const _NotificationList({
+    required this.notifications,
+    required this.pageState,
+    required this.isDark,
+    required this.primary,
+    required this.onSurface,
+    required this.onSurfaceVariant,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final grouped = _groupNotifications(notifications);
+    // Build the flat items list: [String header, AppNotificationModel, ...]
+    final items = <Object>[];
+    for (final entry in grouped.entries) {
+      items.add(entry.key); // header
+      items.addAll(entry.value);
+    }
+
+    // Append footer: load-more or loading indicator
+    final showFooter = pageState.hasMore || pageState.isLoadingMore;
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(
+          top: AppSpacing.xs, bottom: AppSpacing.xl),
+      itemCount: items.length + (showFooter ? 1 : 0),
+      itemBuilder: (context, index) {
+        // Footer
+        if (index == items.length) {
+          if (pageState.isLoadingMore) {
+            return const Padding(
+              padding: EdgeInsets.all(AppSpacing.lg),
+              child: Center(child: CircularProgressIndicator()),
             );
           }
-
-          // Group notifications
-          final grouped = _groupNotifications(notifications);
-
-          return ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-            itemCount: _countItems(grouped),
-            itemBuilder: (context, index) {
-              final item = _getItem(grouped, index);
-
-              if (item is String) {
-                // Section header
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.xs),
-                  child: Text(
-                    item.toUpperCase(),
-                    style: AppTextStyles.labelCaps.copyWith(
-                      color: onSurfaceVariant,
-                    ),
-                  ),
-                );
-              }
-
-              final notification = item as AppNotificationModel;
-              return _NotificationTile(
-                notification: notification,
-                isDark: isDark,
-                primary: primary,
-                onSurface: onSurface,
-                onSurfaceVariant: onSurfaceVariant,
-                onTap: () {
-                  if (!notification.isRead) {
-                    ref
-                        .read(appNotificationNotifierProvider.notifier)
-                        .markAsRead(notification.id);
-                  }
-                },
-                onDismissed: () {
-                  ref
-                      .read(appNotificationNotifierProvider.notifier)
-                      .deleteNotification(notification.id);
-                },
-              );
-            },
+          return Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+            child: OutlinedButton(
+              onPressed: () =>
+                  ref.read(notificationPaginationProvider.notifier).loadMore(),
+              child: const Text('Load more'),
+            ),
           );
-        },
-      ),
+        }
+
+        final item = items[index];
+
+        // Section header
+        if (item is String) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.xs),
+            child: Text(
+              item.toUpperCase(),
+              style: AppTextStyles.labelCaps.copyWith(
+                color: onSurfaceVariant,
+              ),
+            ),
+          );
+        }
+
+        // Notification tile
+        final notification = item as AppNotificationModel;
+        return _NotificationTile(
+          notification: notification,
+          isDark: isDark,
+          primary: primary,
+          onSurface: onSurface,
+          onSurfaceVariant: onSurfaceVariant,
+          onTap: () {
+            if (!notification.isRead) {
+              ref
+                  .read(appNotificationNotifierProvider.notifier)
+                  .markAsRead(notification.id);
+            }
+          },
+          onDismissed: () {
+            ref
+                .read(appNotificationNotifierProvider.notifier)
+                .deleteNotification(notification.id);
+          },
+        );
+      },
     );
   }
 
-  // ── Grouping logic ──────────────────────────────────────────────────────────
+  // ── Grouping: Today / This Week / This Month / Older ─────────────────────
 
   Map<String, List<AppNotificationModel>> _groupNotifications(
       List<AppNotificationModel> notifications) {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final weekStart = todayStart.subtract(const Duration(days: 6));
+    final monthStart = DateTime(now.year, now.month, 1);
 
+    // Use LinkedHashMap insertion order to preserve display order
     final groups = <String, List<AppNotificationModel>>{
       'Today': [],
-      'Yesterday': [],
+      'This Week': [],
+      'This Month': [],
       'Older': [],
     };
 
     for (final n in notifications) {
       final d = DateTime(n.createdAt.year, n.createdAt.month, n.createdAt.day);
-      if (d == today) {
+      if (!d.isBefore(todayStart)) {
         groups['Today']!.add(n);
-      } else if (d == yesterday) {
-        groups['Yesterday']!.add(n);
+      } else if (!d.isBefore(weekStart)) {
+        groups['This Week']!.add(n);
+      } else if (!d.isBefore(monthStart)) {
+        groups['This Month']!.add(n);
       } else {
         groups['Older']!.add(n);
       }
@@ -159,28 +226,6 @@ class NotificationCenterScreen extends ConsumerWidget {
     // Remove empty groups
     groups.removeWhere((_, list) => list.isEmpty);
     return groups;
-  }
-
-  int _countItems(Map<String, List<AppNotificationModel>> grouped) {
-    int count = 0;
-    for (final entry in grouped.entries) {
-      count += 1 + entry.value.length; // 1 header + n items
-    }
-    return count;
-  }
-
-  Object _getItem(
-      Map<String, List<AppNotificationModel>> grouped, int index) {
-    int i = 0;
-    for (final entry in grouped.entries) {
-      if (i == index) return entry.key; // header
-      i++;
-      for (final n in entry.value) {
-        if (i == index) return n;
-        i++;
-      }
-    }
-    throw RangeError('Index $index out of range');
   }
 }
 
@@ -247,7 +292,7 @@ class _NotificationTile extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Type icon
+              // Type icon badge
               Container(
                 width: 40,
                 height: 40,
@@ -286,7 +331,8 @@ class _NotificationTile extends StatelessWidget {
                           Container(
                             width: 8,
                             height: 8,
-                            margin: const EdgeInsets.only(left: AppSpacing.xs),
+                            margin:
+                                const EdgeInsets.only(left: AppSpacing.xs),
                             decoration: BoxDecoration(
                               color: primary,
                               shape: BoxShape.circle,
@@ -351,13 +397,118 @@ class _NotificationTile extends StatelessWidget {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     if (diff.inDays == 1) return 'Yesterday';
+    if (diff.inDays < 7) return '${diff.inDays} days ago';
     return DateFormat('MMM d').format(dt);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _NotificationLoadingSkeleton
+// Shown while the Firestore stream is fetching on first open (N4 fix).
+// Prevents the empty-state from flashing before data arrives.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _NotificationLoadingSkeleton extends StatefulWidget {
+  final bool isDark;
+  const _NotificationLoadingSkeleton({required this.isDark});
+
+  @override
+  State<_NotificationLoadingSkeleton> createState() =>
+      _NotificationLoadingSkeletonState();
+}
+
+class _NotificationLoadingSkeletonState
+    extends State<_NotificationLoadingSkeleton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _anim = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shimmer = widget.isDark
+        ? AppColors.darkSurfaceContainerHigh
+        : AppColors.surfaceContainerLow;
+
+    return FadeTransition(
+      opacity: _anim,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.xl),
+        itemCount: 6,
+        itemBuilder: (_, __) => Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: shimmer,
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Icon placeholder
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: shimmer.withAlpha(180),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 13,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: shimmer.withAlpha(200),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      height: 11,
+                      width: 180,
+                      decoration: BoxDecoration(
+                        color: shimmer.withAlpha(160),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _EmptyNotificationsState
 // ─────────────────────────────────────────────────────────────────────────────
+
 
 class _EmptyNotificationsState extends StatelessWidget {
   final bool isDark;

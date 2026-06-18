@@ -6,9 +6,6 @@ import '../../../data/models/user_model.dart';
 import '../../../data/datasources/firestore_datasource.dart';
 import '../../../data/datasources/local_cache_datasource.dart';
 import '../../../data/repositories/auth_repository.dart';
-import '../../../features/subjects/providers/subjects_provider.dart';
-import '../../../features/notifications/providers/notification_preferences_provider.dart';
-import '../../../features/notifications/providers/app_notification_provider.dart';
 
 part 'profile_provider.g.dart';
 
@@ -80,19 +77,20 @@ class ProfileNotifier extends _$ProfileNotifier {
   }
 
   Future<void> signOut() async {
-    // 1. Sign out from Firebase and Google
+    // 1. Clear SharedPreferences — prevents stale goal/theme leaking to next user.
+    //    Do this BEFORE signing out so we still have the cache instance.
+    try {
+      final cache = await ref.read(localCacheDatasourceProvider.future);
+      await cache.clearAll();
+    } catch (_) {
+      // Non-fatal — proceed with sign out regardless
+    }
+
+    // 2. Sign out from Firebase and Google.
+    //    This triggers authStateChangesProvider → currentUserProvider (null) →
+    //    ALL downstream providers (subjectsStream, userProfile, timetable, etc.)
+    //    automatically tear down their Firestore streams and return empty state.
+    //    No manual ref.invalidate() calls are needed.
     await ref.read(authRepositoryProvider).signOut();
-
-    // 2. Invalidate all user-specific providers to prevent stale data leaking
-    //    into the next account's session. Without this, Account A's data can
-    //    briefly appear when Account B logs in.
-    ref.invalidate(userProfileProvider);
-    ref.invalidate(subjectsNotifierProvider);
-    ref.invalidate(notificationPreferencesProvider);
-    ref.invalidate(appNotificationsProvider);
-    ref.invalidate(unreadNotificationCountProvider);
-
-    // 3. Reset self
-    ref.invalidateSelf();
   }
 }

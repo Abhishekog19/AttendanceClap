@@ -21,9 +21,14 @@ AppNotificationRepository appNotificationRepository(Ref ref) {
 // Manages app-generated notifications stored in Firestore.
 // Path: users/{uid}/notifications/{notificationId}
 //
+// Pagination strategy:
+//   • watchLatestPage() — real-time stream of latest [pageSize] notifications.
+//     Used for badge count and initial list render.
+//   • fetchNextPage() — cursor-based one-shot fetch for "load more".
+//   • watchUnreadCount() — lightweight stream counting only unread docs.
+//
 // All notifications survive:
-//   - App restart
-//   - Device restart
+//   - App restart / device restart
 //   - Logout/login (same uid)
 //   - Firebase sync
 // ─────────────────────────────────────────────────────────────────────────────
@@ -31,6 +36,8 @@ AppNotificationRepository appNotificationRepository(Ref ref) {
 class AppNotificationRepository {
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
+
+  static const int pageSize = 20;
 
   AppNotificationRepository({
     required FirebaseFirestore firestore,
@@ -43,19 +50,99 @@ class AppNotificationRepository {
   CollectionReference<Map<String, dynamic>> _notificationsCol(String uid) =>
       _firestore.collection('users').doc(uid).collection('notifications');
 
-  // ── Stream: real-time ordered list ───────────────────────────────────────
+  // ── Real-time stream: latest page (for list + badge) ─────────────────────
 
-  /// Watch all notifications for the current user, newest first.
-  Stream<List<AppNotificationModel>> watchNotifications() {
+  /// Streams the latest [pageSize] notifications, newest first.
+  /// This is the primary source for the notification center's first page
+  /// and triggers real-time badge updates when new notifications arrive.
+  Stream<List<AppNotificationModel>> watchLatestPage() {
     if (_uid.isEmpty) return Stream.value([]);
     return _notificationsCol(_uid)
         .orderBy('createdAt', descending: true)
-        .limit(100)
+        .limit(pageSize)
         .snapshots()
         .map((snap) => snap.docs
             .map((d) => AppNotificationModel.fromFirestore(d.data()))
             .toList());
   }
+
+  /// Lightweight stream that counts unread notifications without fetching docs.
+  /// Capped at 100 to keep reads fast. UI shows "99+" when at/above cap.
+  Stream<int> watchUnreadCount() {
+    if (_uid.isEmpty) return Stream.value(0);
+    return _notificationsCol(_uid)
+        .where('isRead', isEqualTo: false)
+        .limit(100)
+        .snapshots()
+        .map((snap) => snap.size);
+  }
+
+  /// Fetches ALL unread notification IDs from Firestore, chunked to avoid
+  /// exceeding Firestore's query limits. Used by markAllAsRead so it covers
+  /// notifications beyond the currently-loaded pagination page.
+  Future<List<String>> getAllUnreadIds() async {
+    if (_uid.isEmpty) return [];
+
+    final ids = <String>[];
+    DocumentSnapshot? lastDoc;
+
+    // Page through all unread docs in chunks of 400 to stay under limits
+    while (true) {
+      var query = _notificationsCol(_uid)
+          .where('isRead', isEqualTo: false)
+          .orderBy('createdAt', descending: true)
+          .limit(400);
+
+      if (lastDoc != null) {
+        query = query.startAfterDocument(lastDoc);
+      }
+
+      final snap = await query.get();
+      if (snap.docs.isEmpty) break;
+
+      for (final doc in snap.docs) {
+        final id = doc.data()['id'] as String?;
+        if (id != null && id.isNotEmpty) ids.add(id);
+      }
+
+      if (snap.docs.length < 400) break;
+      lastDoc = snap.docs.last;
+    }
+
+    return ids;
+  }
+
+  // ── Pagination: load more ─────────────────────────────────────────────────
+
+  /// Fetches the next page of notifications after [lastDoc].
+  /// Returns an empty list when there are no more notifications.
+  Future<List<AppNotificationModel>> fetchNextPage(
+      DocumentSnapshot lastDoc) async {
+    if (_uid.isEmpty) return [];
+    final snap = await _notificationsCol(_uid)
+        .orderBy('createdAt', descending: true)
+        .startAfterDocument(lastDoc)
+        .limit(pageSize)
+        .get();
+    return snap.docs
+        .map((d) => AppNotificationModel.fromFirestore(d.data()))
+        .toList();
+  }
+
+  /// Fetches the raw Firestore snapshot for the last document in the current page.
+  /// Used as the pagination cursor for fetchNextPage().
+  Future<DocumentSnapshot?> getDocSnapshot(String notificationId) async {
+    if (_uid.isEmpty) return null;
+    final doc =
+        await _notificationsCol(_uid).doc(notificationId).get();
+    return doc.exists ? doc : null;
+  }
+
+  // ── Backward-compat: stream used by badge provider ─────────────────────────
+
+  /// Alias for watchLatestPage() — kept so existing provider code compiles.
+  Stream<List<AppNotificationModel>> watchNotifications() =>
+      watchLatestPage();
 
   // ── Add ───────────────────────────────────────────────────────────────────
 
