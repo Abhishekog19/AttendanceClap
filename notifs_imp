@@ -1,0 +1,394 @@
+# Notification System — Complete Audit & Implementation Plan
+
+## Summary
+
+A comprehensive audit of the entire notification pipeline. The codebase has a **solid architectural skeleton** but contains several critical bugs and structural gaps that explain every reported user issue. The core infrastructure (Firestore storage, Riverpod providers, pagination) is well-designed. The failures are concentrated in:
+
+1. **Missing notification types** — the model's `AppNotificationType` enum is misaligned with the required V1 types.
+2. **Nightly Bunk Planner does NOT write to Firestore** — it only schedules a device-local notification, so the Notification Center always misses it.
+3. **Home page has no notification preview widget** — there is only a bell icon; no "Recent Notifications" section exists.
+4. **Attendance Warning writes to Notification Center but with incorrect/legacy type name** and the message truncation is caused by `maxLines: 3` cutting off multiline body text.
+5. **Account isolation is structurally correct** but has one gap: `notificationPreferencesRepository` and `appNotificationRepository` both capture `FirebaseAuth.instance` at construction time but the provider is NOT re-created on auth change — they will serve the right UID after login but may return empty data during logout-to-login transition.
+6. **Model is missing required fields**: `userId`, `priority`, `payload` are absent from `AppNotificationModel`.
+7. **The Notification Center** is fully built and functional but the empty state shows incorrectly if providers are `AutoDispose` (Riverpod disposes `notificationPaginationProvider` when center is popped, losing state on re-entry).
+
+---
+
+## User-Reported Issue Root Causes
+
+| # | Issue | Root Cause |
+|---|---|---|
+| 1 | Notification Center appears broken | `notificationPaginationProvider` is `AutoDispose` — state resets every time user navigates away and back, creating re-fetch flash |
+| 2 | Home page notification section mostly empty | **No notification preview widget exists on the Home page** — only a bell icon |
+| 3 | Only one notification displayed | Only `attendanceWarning` type writes to Firestore notification center; all other types (`safeBunk`, `classReminder`) are device-only |
+| 4 | Text truncated | `maxLines: 3` with `TextOverflow.ellipsis` clips multiline attendance warning messages (e.g. 5 subjects = 5 lines) |
+| 5 | Not organized historically | Grouping logic works correctly — but only 1 notification ever exists, so no groups appear |
+| 6 | Notifications don't persist | Works for `attendanceWarning` (Firestore-backed). All other types use device-local only, lost on app reinstall |
+| 7 | Previous account data after switch | `notificationPaginationProvider` with `ref.listen` inside `build()` may preserve merged state if auth change doesn't force full dispose |
+| 8 | Duplicates | `attendanceWarning` has correct dedup guard. `classReminder` / `bunkPlanner` have no Firestore records at all |
+
+---
+
+## Phase 1 — Architecture Map
+
+```
+NOTIFICATION TRIGGER
+├── NotificationSchedulerWatcher (auto-runs on timetable/prefs/subject changes)
+│   └── NotificationScheduler.rescheduleAll()
+│       ├── scheduleClassReminders()         → device-only (flutter_local_notifications)
+│       ├── scheduleAttendanceReminders()    → device-only
+│       ├── scheduleSafeBunkPlanner()        → device-only ← MISSING Firestore write
+│       ├── scheduleDailySummary()           → device-only ← MISSING Firestore write
+│       └── checkDailyAttendanceWarning()   → device + Firestore ✓
+│
+NOTIFICATION STORAGE
+├── Firestore: users/{uid}/notifications/{notificationId}  ← only attendanceWarning
+├── Device (flutter_local_notifications)                   ← classReminders, bunkPlanner, summary, attendanceActions
+│
+NOTIFICATION RETRIEVAL
+├── appNotificationsProvider (Stream<List<AppNotificationModel>>) ← Firestore stream, latest 20
+├── unreadNotificationCountProvider (Stream<int>)                 ← Firestore query
+├── notificationPaginationProvider (Notifier)                     ← merges stream + pagination
+│
+NOTIFICATION DISPLAY
+├── DashboardScreen._NotificationBell → unread badge only (no preview list)
+└── NotificationCenterScreen → full list with grouping + pagination
+```
+
+### Critical Gap
+The Home page **has no notification preview section** — only a bell badge. The notification center works but is empty because only 1 notification type persists to Firestore.
+
+---
+
+## Phase 2 — Storage Audit
+
+### Current `AppNotificationModel` Fields
+
+| Field | Present | Required |
+|---|---|---|
+| `id` | ✅ | ✅ |
+| `userId` | ❌ | ✅ |
+| `type` | ✅ | ✅ |
+| `title` | ✅ | ✅ |
+| `message` | ✅ | ✅ |
+| `timestamp` (as `createdAt`) | ✅ | ✅ |
+| `isRead` | ✅ | ✅ |
+| `payload` | ❌ | ✅ |
+| `priority` | ❌ | ✅ |
+
+**Missing fields**: `userId`, `payload`, `priority`.
+
+### Persistence Verdict
+- ✅ Survives app restart (Firestore)
+- ✅ Survives device restart (Firestore)
+- ✅ Linked to logged-in user (`users/{uid}/notifications`)
+- ✅ Not shared across accounts (subcollection under UID)
+- ❌ `bunkPlanner` and `classReminder` use device-only storage — lost on reinstall
+- ❌ Deduplication only applied to `attendanceWarning`; other types have no Firestore records to deduplicate
+
+### Deduplication
+Current: `dailyNotificationId(type, dateKey)` = `"${type.name}_${dateKey}"` — deterministic. ✅
+Gap: Only called for `attendanceWarning`. Must also be called for bunk planner.
+
+---
+
+## Phase 3 — Account Isolation Audit
+
+### Auth Flow Analysis
+
+`appNotificationRepositoryProvider` creates `AppNotificationRepository(firestore, auth)`:
+- `_uid` is a **getter** computing `_auth.currentUser?.uid` at call time — ✅ reactive
+- `appNotificationsProvider` watches `authStateChangesProvider` → re-subscribes on auth change ✅
+- `unreadNotificationCountProvider` watches `authStateChangesProvider` ✅
+
+### Gap Found
+`notificationPaginationProvider` uses `ref.listen(appNotificationsProvider)` inside `build()`.
+When user **A** logs out and user **B** logs in:
+1. `appNotificationsProvider` re-fires with B's notifications ✅
+2. But `notificationPaginationProvider` may still contain A's `extraPageItems` in the merged state if the notifier isn't fully disposed between sessions.
+
+**Fix**: Add `ref.watch(authStateChangesProvider)` to `notificationPaginationProvider.build()` and reset state on auth change.
+
+### LocalCacheDatasource
+`clearAll()` clears `subjectsCache`, `attendanceGoal`, `themeMode` — does NOT clear any notification cache because notifications are fully Firestore-backed. ✅
+
+---
+
+## Phase 4 — Notification Types Audit
+
+### Required V1 Types vs. Current Enum
+
+| Required Type | Current Enum Value | Status |
+|---|---|---|
+| Attendance Danger | `attendanceWarning` | ✅ mapped (rename needed) |
+| Attendance Recovery | — | ❌ **MISSING** |
+| Critical Attendance | — | ❌ **MISSING** |
+| Nightly Bunk Planner | `safeBunk` | ⚠️ exists but device-only |
+| Reminder (class) | `classReminder` | ⚠️ exists but device-only |
+| Reminder (marking) | — (uses `classReminder`) | ⚠️ reusing wrong type |
+
+**Unsupported types to deprecate/remove**: `delay`, `subscription` — currently in enum but no generation code. `system` should be kept as a fallback.
+
+### Proposed Cleaned Enum
+```dart
+enum AppNotificationType {
+  attendanceDanger,      // was attendanceWarning
+  attendanceRecovery,    // NEW
+  criticalAttendance,    // NEW  
+  nightlyBunkPlanner,    // was safeBunk (device+Firestore)
+  classReminder,         // device-only (not written to Firestore center)
+  attendanceMarking,     // device-only (not written to Firestore center)
+  system,                // fallback
+}
+```
+
+---
+
+## Phase 5 — Home Page Notification Widget Audit
+
+**Status: Widget does not exist.** The dashboard only has a bell icon.
+
+### What needs to be built
+A `RecentNotificationsCard` widget in `DashboardScreen` that:
+- Uses `appNotificationsProvider` (already streaming, zero new Firestore reads)
+- Shows the latest 3–5 notifications
+- Shows unread dot per item
+- Truncates long titles to 1 line, body to 2 lines
+- Taps open `NotificationCenterScreen`
+- Has a proper empty state (hidden when no notifications exist)
+- Has a "See All" → notification center link
+
+---
+
+## Phase 6 — Notification Center Audit
+
+### Current Implementation Assessment
+
+| Feature | Status |
+|---|---|
+| Groups: Today/This Week/This Month/Older | ✅ Correct logic |
+| Pagination (first 20 live, load more) | ✅ Correct design |
+| Loading skeleton | ✅ Present |
+| Empty state | ✅ Present |
+| Mark as read (single) | ✅ |
+| Mark all as read | ✅ Fetches all unread IDs |
+| Delete (swipe) | ✅ |
+| Unread badge in title | ✅ |
+
+### Bugs Found
+
+**Bug 1 — AutoDispose loses state on navigation pop:**
+`notificationPaginationProvider` is `AutoDispose`. When the user taps back and re-opens Notifications, the state resets and refetches from scratch (loading flash, scroll position lost).
+Fix: Keep first page re-subscription, but add `ref.watch(authStateChangesProvider)` and use `keepAlive()` or convert to non-AutoDispose for the duration of the app session.
+
+**Bug 2 — Text truncation on long multiline messages:**
+`maxLines: 3` truncates `attendanceWarning` messages that list 4+ subjects. Each subject is a newline, so messages with 5+ subjects are cut.
+Fix: Expand to `maxLines: 5` OR use an expand/collapse mechanism. Add a "Tap to expand" behavior.
+
+**Bug 3 — No "Clear All" action:**
+Only "Mark all read" exists. Should add a "Clear all" confirmation action.
+
+---
+
+## Phase 7 — Performance Audit
+
+| Concern | Verdict |
+|---|---|
+| `watchLatestPage()` uses `limit(20)` | ✅ Fast |
+| `watchUnreadCount()` uses `limit(100)` | ✅ Fast — needs Firestore index on `(isRead, createdAt)` |
+| `getAllUnreadIds()` pages in chunks of 400 | ✅ Correct |
+| `_groupNotifications()` is O(n) in memory | ✅ Fine |
+| First page is real-time stream | ✅ |
+| Extra pages fetched on demand | ✅ |
+| Home page loads before full notification history | ✅ (stream limit(20)) |
+
+### Firestore Index Needed
+```
+Collection: users/{uid}/notifications
+Fields: isRead ASC, createdAt DESC
+```
+This index is required for `watchUnreadCount()` to be fast at scale (1000+ notifications).
+
+---
+
+## Phase 8 — Edge Cases
+
+| Case | Status |
+|---|---|
+| App restart | ✅ Firestore stream reconnects |
+| Device restart | ✅ Firestore stream reconnects |
+| Account switching | ⚠️ Pagination notifier may retain extra-page items — needs auth watch fix |
+| Offline mode | ✅ Firestore offline cache handles this |
+| Duplicate notification | ✅ `notificationExists()` guard for attendanceWarning; ❌ missing for bunkPlanner |
+| Mark read | ✅ |
+| Mark all read | ✅ |
+| Delete notification | ✅ Swipe to dismiss |
+| Clear all | ❌ Not implemented |
+| Empty history | ✅ Empty state shows |
+| Large history | ✅ Pagination handles it |
+
+---
+
+## Phase 9 — Nightly Bunk Planner
+
+### Current State
+`scheduleSafeBunkPlanner()` schedules a device-local daily notification only. No Firestore record is written.
+
+### Required Change
+After scheduling the device notification, also write to the Firestore notification center using a deterministic daily ID:
+
+```dart
+final centerId = 'nightlyBunkPlanner_$dateKey'; // e.g. nightlyBunkPlanner_2026-06-18
+final alreadyStored = await notificationRepo?.notificationExists(centerId) ?? true;
+if (!alreadyStored) {
+  await notificationRepo?.addNotification(AppNotificationModel(
+    id: centerId,
+    title: title,
+    message: body,
+    type: AppNotificationType.nightlyBunkPlanner,
+    createdAt: DateTime.now(),
+    isRead: false,
+  ));
+}
+```
+
+The exact message format required:
+```
+Tomorrow's Bunk Opportunities
+
+You can safely skip:
+• DBMS
+• Physics Lab
+
+Attend all other lectures.
+```
+
+Or if no bunks:
+```
+No safe bunks available tomorrow. Attend all scheduled lectures.
+```
+
+---
+
+## Proposed Changes
+
+### Component: Model Layer
+
+#### [MODIFY] [app_notification_model.dart](file:///c:/Users/Abhishek/OneDrive/Desktop/Projects/Attu/lib/features/notifications/models/app_notification_model.dart)
+- Rename enum values to match V1 spec: `attendanceDanger`, `attendanceRecovery`, `criticalAttendance`, `nightlyBunkPlanner`, `classReminder`, `attendanceMarking`, `system`
+- Remove `delay`, `subscription`
+- Add `userId`, `priority` (enum: `low`, `normal`, `high`), `payload` (nullable String) fields
+- Update `toFirestore()` and `fromFirestore()` accordingly
+- Backward-compat: `fromFirestore()` maps old enum names to new ones
+
+---
+
+### Component: Repository Layer
+
+#### [MODIFY] [app_notification_repository.dart](file:///c:/Users/Abhishek/OneDrive/Desktop/Projects/Attu/lib/features/notifications/repositories/app_notification_repository.dart)
+- Add `clearAll()` method — batch-deletes all notifications for current user (for "Clear All" feature)
+- No other structural changes needed — the design is solid
+
+---
+
+### Component: Provider Layer
+
+#### [MODIFY] [app_notification_provider.dart](file:///c:/Users/Abhishek/OneDrive/Desktop/Projects/Attu/lib/features/notifications/providers/app_notification_provider.dart)
+- Add `ref.watch(authStateChangesProvider)` to `NotificationPagination.build()` to reset pagination state on account switch
+- Add `clearAll()` method to `AppNotificationNotifier`
+- Add `dailyNotificationId()` helper for the new type names
+
+---
+
+### Component: Scheduler Layer
+
+#### [MODIFY] [notification_scheduler.dart](file:///c:/Users/Abhishek/OneDrive/Desktop/Projects/Attu/lib/features/notifications/scheduler/notification_scheduler.dart)
+- `scheduleSafeBunkPlanner()`: write consolidated nightly bunk planner to Firestore using formatted bullet-point message and stable daily ID
+- Message format: "Tomorrow's Bunk Opportunities\n\nYou can safely skip:\n• DBMS\n• Physics Lab\n\nAttend all other lectures." OR "No safe bunks available tomorrow. Attend all scheduled lectures."
+- `checkDailyAttendanceWarning()`: update enum type reference from `attendanceWarning` to `attendanceDanger`
+
+---
+
+### Component: Notification Center Screen
+
+#### [MODIFY] [notification_center_screen.dart](file:///c:/Users/Abhishek/OneDrive/Desktop/Projects/Attu/lib/features/notifications/screens/notification_center_screen.dart)
+- Increase `maxLines` from 3 to 5 for message body
+- Add "Clear All" option in AppBar actions (confirmation dialog)
+- Update icon/color maps for new enum values
+- Add expand/collapse for long messages
+
+---
+
+### Component: Home Page
+
+#### [MODIFY] [dashboard_screen.dart](file:///c:/Users/Abhishek/OneDrive/Desktop/Projects/Attu/lib/features/dashboard/screens/dashboard_screen.dart)
+- Add `RecentNotificationsCard` widget below the Subject Overview section
+- Uses `appNotificationsProvider` — zero new Firestore reads (already streaming)
+- Shows latest 3–5 notifications with unread indicator
+- Taps open notification center
+- Hidden when notification list is empty
+
+#### [NEW] `lib/features/dashboard/widgets/recent_notifications_card.dart`
+- New widget file for the home page notification preview
+
+---
+
+## Verification Plan
+
+### Automated
+- `flutter analyze lib/features/notifications/` — zero issues
+- `flutter pub run build_runner build` — regenerate `.g.dart` after enum changes
+
+### Manual Verification
+1. Send attendance warning → appears in Notification Center ✓
+2. Trigger bunk planner (set `plannerTime` to now+1min) → appears in Notification Center ✓
+3. Open Notification Center → groups (Today/This Week) render correctly ✓
+4. Swipe delete → notification gone ✓
+5. Mark all read → badge clears ✓
+6. Clear all → empty state shows ✓
+7. Login as A → add notifications → logout → login as B → notifications empty ✓
+8. Re-login as A → A's notifications reappear ✓
+9. Home page shows latest 3-5 notifications ✓
+10. Long multiline message visible without truncation ✓
+
+---
+
+## Definition of Done Checklist
+
+- [ ] `AppNotificationModel` has `userId`, `priority`, `payload` fields
+- [ ] Enum updated to V1 types (attendanceDanger, nightlyBunkPlanner, etc.)
+- [ ] `scheduleSafeBunkPlanner()` writes to Firestore notification center
+- [ ] Nightly bunk planner message uses bullet-point format
+- [ ] `NotificationPagination` resets on auth change
+- [ ] Home page shows `RecentNotificationsCard` (latest 3–5)
+- [ ] `maxLines` expanded in `NotificationCenterScreen`
+- [ ] "Clear All" implemented
+- [ ] All icon/color mappings updated for new enum values
+- [ ] `build_runner` passes clean
+- [ ] `flutter analyze` passes clean (0 issues in notifications/)
+- [ ] Manual: bunk planner appears in center
+- [ ] Manual: account switch clears notification state
+- [ ] Manual: home page notification preview visible
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> **Q1: Attendance Recovery / Critical Attendance notification generation logic?**
+> These two new types are required in the enum but no generation logic currently exists. Should I implement generation triggers for these?
+> - **Attendance Recovery**: fire when a subject crosses from below → above the goal threshold?
+> - **Critical Attendance**: fire when attendance drops below a "critical" threshold (e.g. 60%)?
+> Or should these remain as enum values only (reserved for future implementation)?
+
+> [!IMPORTANT]
+> **Q2: Should `classReminder` and `attendanceMarking` write to the Notification Center?**
+> These are high-frequency (daily, per-class). Writing them to Firestore means the center fills with dozens of entries per week. Recommendation: **do NOT** write these to Firestore — they are device-level transient reminders, not persistent history. Confirm?
+
+> [!IMPORTANT]
+> **Q3: `NotificationPagination` keepAlive vs AutoDispose?**
+> Making it `keepAlive()` means it persists for the app session (fast re-opens). AutoDispose resets on every navigation pop (clean but shows loading flash). **Recommendation: keepAlive** for duration of auth session, dispose on logout. Confirm?
+
+> [!IMPORTANT]
+> **Q4: "Clear All" scope?**
+> Should "Clear All" delete all notifications from Firestore permanently, or just hide them (mark all read)? Deleting is permanent and irreversible.
