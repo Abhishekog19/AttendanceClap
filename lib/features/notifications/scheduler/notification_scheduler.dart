@@ -469,12 +469,15 @@ class NotificationScheduler {
   // ── Fire time helper ──────────────────────────────────────────────────────
 
   /// Computes the notification fire time: 2h after the last session ends.
-  /// Falls back to 5 minutes from now if no sessions today.
+  /// Falls back to 5 minutes from now if there are no active sessions today.
   static DateTime _computeFireTime(
       List<ClassSession> sessions, DateTime now) {
-    if (sessions.isNotEmpty) {
-      final latestEndMinutes = sessions
-          .where((s) => !s.isCancelled)
+    // Filter to non-cancelled sessions first so that a day where every class
+    // is cancelled doesn't accidentally fold over an empty iterable and return
+    // a 0-minute baseline, which would yield an incorrect fire time.
+    final activeSessions = sessions.where((s) => !s.isCancelled).toList();
+    if (activeSessions.isNotEmpty) {
+      final latestEndMinutes = activeSessions
           .map((s) => _parseMinutes(s.displayEndTime))
           .fold(0, (max, v) => v > max ? v : max);
 

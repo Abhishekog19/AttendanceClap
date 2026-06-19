@@ -124,11 +124,16 @@ class AppNotificationModel {
 
   // ── copyWith ──────────────────────────────────────────────────────────────
 
+  // Private sentinel used by copyWith to distinguish "payload not provided"
+  // from "payload explicitly set to null". Using `??` alone makes it impossible
+  // to clear a nullable field because null always coalesces to the old value.
+  static const Object _payloadSentinel = Object();
+
   AppNotificationModel copyWith({
     bool? isRead,
     String? userId,
     NotificationPriority? priority,
-    String? payload,
+    Object? payload = _payloadSentinel,
   }) {
     return AppNotificationModel(
       id: id,
@@ -139,7 +144,7 @@ class AppNotificationModel {
       createdAt: createdAt,
       isRead: isRead ?? this.isRead,
       priority: priority ?? this.priority,
-      payload: payload ?? this.payload,
+      payload: payload == _payloadSentinel ? this.payload : payload as String?,
     );
   }
 }

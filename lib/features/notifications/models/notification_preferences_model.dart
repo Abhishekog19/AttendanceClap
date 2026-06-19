@@ -186,7 +186,7 @@ class NotificationPreferences {
       lowAttendanceAlertsEnabled: b('lowAttendanceAlertsEnabled', true),
       recoverySuggestionsEnabled: b('recoverySuggestionsEnabled', true),
       criticalAttendanceEnabled: b('criticalAttendanceEnabled', true),
-      criticalThreshold: (m['criticalThreshold'] as num?)?.toDouble() ?? 65.0,
+      criticalThreshold: ((m['criticalThreshold'] as num?)?.toDouble() ?? 65.0).clamp(0.0, 100.0),
       safeBunkPlannerEnabled: b('safeBunkPlannerEnabled', true),
       plannerTime: TimeOfDay(
         hour: i('plannerTimeHour', 22),
@@ -274,7 +274,7 @@ class NotificationPreferences {
           recoverySuggestionsEnabled ?? this.recoverySuggestionsEnabled,
       criticalAttendanceEnabled:
           criticalAttendanceEnabled ?? this.criticalAttendanceEnabled,
-      criticalThreshold: criticalThreshold ?? this.criticalThreshold,
+      criticalThreshold: (criticalThreshold ?? this.criticalThreshold).clamp(0.0, 100.0),
       safeBunkPlannerEnabled:
           safeBunkPlannerEnabled ?? this.safeBunkPlannerEnabled,
       plannerTime: plannerTime ?? this.plannerTime,
