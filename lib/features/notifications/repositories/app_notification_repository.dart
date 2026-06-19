@@ -204,11 +204,14 @@ class AppNotificationRepository {
   /// Executes in batch pages of 400 to stay within Firestore write limits.
   /// This is a destructive, irreversible operation — always confirm before calling.
   Future<void> clearAll() async {
-    if (_uid.isEmpty) return;
+    // Capture the uid once before the loop begins so that an auth change
+    // mid-deletion cannot redirect later batches to a different user's account.
+    final uid = _uid;
+    if (uid.isEmpty) return;
 
     DocumentSnapshot? lastDoc;
     while (true) {
-      var query = _notificationsCol(_uid).limit(400);
+      var query = _notificationsCol(uid).limit(400);
       if (lastDoc != null) query = query.startAfterDocument(lastDoc);
 
       final snap = await query.get();

@@ -335,6 +335,8 @@ class _NotificationSettingsScreenState
                     enabled: _local.criticalAttendanceEnabled &&
                         _local.notificationsEnabled,
                     onChanged: (v) =>
+                        setState(() => _local = _local.copyWith(criticalThreshold: v)),
+                    onChangeEnd: (v) =>
                         _patch((p) => p.copyWith(criticalThreshold: v)),
                   ),
                   _divider(borderColor),
@@ -700,6 +702,7 @@ class _NotificationSettingsScreenState
     required Color onSurfaceVariant,
     bool enabled = true,
     required ValueChanged<double> onChanged,
+    ValueChanged<double>? onChangeEnd,
   }) =>
       ListTile(
         leading: Icon(icon,
@@ -723,6 +726,7 @@ class _NotificationSettingsScreenState
                     divisions: divisions,
                     activeColor: enabled ? primary : primary.withAlpha(80),
                     onChanged: enabled ? onChanged : null,
+                    onChangeEnd: enabled ? onChangeEnd : null,
                   ),
                 ),
                 SizedBox(

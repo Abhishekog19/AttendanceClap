@@ -62,11 +62,25 @@ enum LeaveVerdict {
       };
 }
 
-LeaveVerdict _computeVerdict(LeavePlanResult result, double goal) {
+LeaveVerdict _computeVerdict(
+    LeavePlanResult result, double goal, List<SubjectPrediction> predictions) {
   if (result.overallAfter < goal) return LeaveVerdict.notRecommended;
+
+  // Check subjects directly impacted by the leave
   if (result.subjectImpacts.any((i) => i.isBelow(goal))) {
     return LeaveVerdict.risky;
   }
+
+  // Also check subjects NOT in the date range — they are excluded from
+  // subjectImpacts but may already be below goal. The leave is only truly
+  // SAFE when every subject (unchanged or not) remains at or above goal.
+  final impactedIds =
+      result.subjectImpacts.map((i) => i.subjectId).toSet();
+  final anyUnaffectedBelowGoal = predictions.any((p) =>
+      !impactedIds.contains(p.subject.id) &&
+      p.currentPct < goal);
+  if (anyUnaffectedBelowGoal) return LeaveVerdict.risky;
+
   return LeaveVerdict.safe;
 }
 
@@ -325,7 +339,7 @@ class LeavePlannerCard extends ConsumerWidget {
                 padding: const EdgeInsets.fromLTRB(
                     AppSpacing.md, 0, AppSpacing.md, AppSpacing.md),
                 child: _VerdictBadge(
-                  verdict: _computeVerdict(result, data.goal),
+                  verdict: _computeVerdict(result, data.goal, data.predictions),
                 ),
               ),
             ] else ...[

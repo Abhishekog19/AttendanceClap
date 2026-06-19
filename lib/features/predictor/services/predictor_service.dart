@@ -407,20 +407,39 @@ class PredictorService {
       for (final p in predictions) p.subject.name.trim(): p,
     };
 
+    // Track remaining bunks per subject as we iterate, so that multiple
+    // lectures of the same subject each consume from the same decrementing
+    // counter rather than all reading the same static pred.safeBunks value.
+    final remainingBunks = <String, int>{
+      for (final p in predictions) p.subject.name.trim(): p.safeBunks,
+    };
+
     final result = <TomorrowOpportunity>[];
     for (final entry in tomorrowEntries) {
-      final pred = predMap[entry.subject.trim()];
-      // Safe to skip only when bunks > 1 (keeps at least 1 buffer)
-      final safety = (pred != null && pred.safeBunks > 1)
+      final subjectKey = entry.subject.trim();
+      final pred = predMap[subjectKey];
+      final bunksLeft = remainingBunks[subjectKey] ?? 0;
+
+      // Safe to skip only when the subject still has > 1 bunk remaining
+      // (keeps at least 1 buffer). Uses the decremented per-iteration counter,
+      // not the static pred.safeBunks, so subsequent lectures of the same
+      // subject correctly reflect the reduced availability.
+      final safety = (pred != null && bunksLeft > 1)
           ? TomorrowSafety.safeToSkip
           : TomorrowSafety.attendRecommended;
+
       result.add(TomorrowOpportunity(
         subjectName: entry.subject,
         startTime: entry.startTime,
         endTime: entry.endTime,
         safety: safety,
-        safeBunksRemaining: pred?.safeBunks ?? 0,
+        safeBunksRemaining: bunksLeft,
       ));
+
+      // Consume one bunk for this subject if it was marked safe to skip
+      if (safety == TomorrowSafety.safeToSkip) {
+        remainingBunks[subjectKey] = bunksLeft - 1;
+      }
     }
 
     // Sort: safe-to-skip first, then by start time

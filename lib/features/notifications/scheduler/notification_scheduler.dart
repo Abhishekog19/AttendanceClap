@@ -229,142 +229,142 @@ class NotificationScheduler {
     AppNotificationRepository? notificationRepo,
     required String currentUserId,
   }) async {
-    if (!prefs.lowAttendanceAlertsEnabled) return;
-
     final now = DateTime.now();
     final dateKey = _dateKey(now);
 
     // ── Danger warning (below attendanceGoal) ───────────────────────────────
 
-    final alreadyFiredToday = await repo.hasWarningFiredToday();
-    if (!alreadyFiredToday) {
-      final lowSubjects = subjects.where((s) {
-        if (s.totalClasses == 0) return false;
-        return s.attendancePercentage < attendanceGoal;
-      }).toList();
+    if (prefs.lowAttendanceAlertsEnabled) {
+      final alreadyFiredToday = await repo.hasWarningFiredToday();
+      if (!alreadyFiredToday) {
+        final lowSubjects = subjects.where((s) {
+          if (s.totalClasses == 0) return false;
+          return s.attendancePercentage < attendanceGoal;
+        }).toList();
 
-      if (lowSubjects.isNotEmpty) {
-        final lines = lowSubjects.map((s) {
-          final classesNeeded = _classesNeededToRecover(
-            attended: s.attendedClasses,
-            total: s.totalClasses,
-            target: attendanceGoal / 100,
-          );
-          return '• ${s.name} → Attend next $classesNeeded class${classesNeeded == 1 ? '' : 'es'}';
-        }).join('\n');
+        if (lowSubjects.isNotEmpty) {
+          final lines = lowSubjects.map((s) {
+            final classesNeeded = _classesNeededToRecover(
+              attended: s.attendedClasses,
+              total: s.totalClasses,
+              target: attendanceGoal / 100,
+            );
+            return '• ${s.name} → Attend next $classesNeeded class${classesNeeded == 1 ? '' : 'es'}';
+          }).join('\n');
 
-        const title = '📊 Attendance Alert';
-        final body =
-            'The following subjects are below your target:\n\n$lines';
+          const title = '📊 Attendance Alert';
+          final body =
+              'The following subjects are below your target:\n\n$lines';
 
-        DateTime fireTime = _computeFireTime(sessions, now);
-        if (!prefs.isQuietHour(fireTime)) {
-          final dangerNotifId =
-              stableNotificationId('daily_danger_$dateKey') + 50000;
+          DateTime fireTime = _computeFireTime(sessions, now);
+          if (!prefs.isQuietHour(fireTime)) {
+            final dangerNotifId =
+                stableNotificationId('daily_danger_$dateKey') + 50000;
 
-          await _svc.scheduleOnce(
-            id: dangerNotifId,
-            title: title,
-            body: body,
-            scheduledDate: tz.TZDateTime.from(fireTime, tz.local),
-            channelId: NotificationChannels.attendanceAlerts,
-            channelName: 'Attendance Alerts',
-            bigText: true,
-          );
+            await _svc.scheduleOnce(
+              id: dangerNotifId,
+              title: title,
+              body: body,
+              scheduledDate: tz.TZDateTime.from(fireTime, tz.local),
+              channelId: NotificationChannels.attendanceAlerts,
+              channelName: 'Attendance Alerts',
+              bigText: true,
+            );
 
-          // Record dedup flag BEFORE Firestore write to prevent race condition
-          await repo.recordDailyWarningFired();
+            // Record dedup flag BEFORE Firestore write to prevent race condition
+            await repo.recordDailyWarningFired();
 
-          if (notificationRepo != null && currentUserId.isNotEmpty) {
-            final centerId = 'attendanceDanger_$dateKey';
-            final alreadyStored =
-                await notificationRepo.notificationExists(centerId);
-            if (!alreadyStored) {
-              await notificationRepo.addNotification(AppNotificationModel(
-                id: centerId,
-                userId: currentUserId,
-                title: title,
-                message: body,
-                type: AppNotificationType.attendanceDanger,
-                priority: NotificationPriority.high,
-                createdAt: now,
-                isRead: false,
-              ));
+            if (notificationRepo != null && currentUserId.isNotEmpty) {
+              final centerId = 'attendanceDanger_$dateKey';
+              final alreadyStored =
+                  await notificationRepo.notificationExists(centerId);
+              if (!alreadyStored) {
+                await notificationRepo.addNotification(AppNotificationModel(
+                  id: centerId,
+                  userId: currentUserId,
+                  title: title,
+                  message: body,
+                  type: AppNotificationType.attendanceDanger,
+                  priority: NotificationPriority.high,
+                  createdAt: now,
+                  isRead: false,
+                ));
+              }
             }
-          }
 
-          // ignore: avoid_print
-          print('[NotificationScheduler] Danger warning scheduled for $fireTime — ${lowSubjects.length} subjects.');
+            // ignore: avoid_print
+            print('[NotificationScheduler] Danger warning scheduled for $fireTime — ${lowSubjects.length} subjects.');
+          }
         }
       }
     }
 
     // ── Critical attendance alert (below criticalThreshold) ─────────────────
 
-    if (!prefs.criticalAttendanceEnabled) return;
+    if (prefs.criticalAttendanceEnabled) {
+      final alreadyCriticalFiredToday = await repo.hasCriticalFiredToday();
+      if (alreadyCriticalFiredToday) {
+        // ignore: avoid_print
+        print('[NotificationScheduler] Critical alert already fired today — skipping.');
+      } else {
 
-    final alreadyCriticalFiredToday = await repo.hasCriticalFiredToday();
-    if (alreadyCriticalFiredToday) {
-      // ignore: avoid_print
-      print('[NotificationScheduler] Critical alert already fired today — skipping.');
-      return;
-    }
+        final criticalSubjects = subjects.where((s) {
+          if (s.totalClasses == 0) return false;
+          return s.attendancePercentage < prefs.criticalThreshold;
+        }).toList();
 
-    final criticalSubjects = subjects.where((s) {
-      if (s.totalClasses == 0) return false;
-      return s.attendancePercentage < prefs.criticalThreshold;
-    }).toList();
+        if (criticalSubjects.isNotEmpty) {
+          final criticalLines = criticalSubjects.map((s) {
+            return '• ${s.name} → ${s.attendancePercentage.toStringAsFixed(1)}%';
+          }).join('\n');
 
-    if (criticalSubjects.isEmpty) return;
+          const criticalTitle = '🚨 Critical Attendance Alert';
+          final criticalBody =
+              'These subjects are critically low — immediate action required:\n\n$criticalLines';
 
-    final criticalLines = criticalSubjects.map((s) {
-      return '• ${s.name} → ${s.attendancePercentage.toStringAsFixed(1)}%';
-    }).join('\n');
+          // Critical fires immediately (5 min from now) — too urgent to wait
+          final criticalFireTime = now.add(const Duration(minutes: 5));
 
-    const criticalTitle = '🚨 Critical Attendance Alert';
-    final criticalBody =
-        'These subjects are critically low — immediate action required:\n\n$criticalLines';
+          if (!prefs.isQuietHour(criticalFireTime)) {
+            final criticalNotifId =
+                stableNotificationId('daily_critical_$dateKey') + 60000;
 
-    // Critical fires immediately (5 min from now) — too urgent to wait
-    final criticalFireTime = now.add(const Duration(minutes: 5));
+            await _svc.scheduleOnce(
+              id: criticalNotifId,
+              title: criticalTitle,
+              body: criticalBody,
+              scheduledDate: tz.TZDateTime.from(criticalFireTime, tz.local),
+              channelId: NotificationChannels.attendanceAlerts,
+              channelName: 'Attendance Alerts',
+              bigText: true,
+            );
 
-    if (!prefs.isQuietHour(criticalFireTime)) {
-      final criticalNotifId =
-          stableNotificationId('daily_critical_$dateKey') + 60000;
+            // Record dedup flag before Firestore write
+            await repo.recordDailyCriticalFired();
 
-      await _svc.scheduleOnce(
-        id: criticalNotifId,
-        title: criticalTitle,
-        body: criticalBody,
-        scheduledDate: tz.TZDateTime.from(criticalFireTime, tz.local),
-        channelId: NotificationChannels.attendanceAlerts,
-        channelName: 'Attendance Alerts',
-        bigText: true,
-      );
+            if (notificationRepo != null && currentUserId.isNotEmpty) {
+              final centerId = 'criticalAttendance_$dateKey';
+              final alreadyStored =
+                  await notificationRepo.notificationExists(centerId);
+              if (!alreadyStored) {
+                await notificationRepo.addNotification(AppNotificationModel(
+                  id: centerId,
+                  userId: currentUserId,
+                  title: criticalTitle,
+                  message: criticalBody,
+                  type: AppNotificationType.criticalAttendance,
+                  priority: NotificationPriority.critical,
+                  createdAt: now,
+                  isRead: false,
+                ));
+              }
+            }
 
-      // Record dedup flag before Firestore write
-      await repo.recordDailyCriticalFired();
-
-      if (notificationRepo != null && currentUserId.isNotEmpty) {
-        final centerId = 'criticalAttendance_$dateKey';
-        final alreadyStored =
-            await notificationRepo.notificationExists(centerId);
-        if (!alreadyStored) {
-          await notificationRepo.addNotification(AppNotificationModel(
-            id: centerId,
-            userId: currentUserId,
-            title: criticalTitle,
-            message: criticalBody,
-            type: AppNotificationType.criticalAttendance,
-            priority: NotificationPriority.critical,
-            createdAt: now,
-            isRead: false,
-          ));
+            // ignore: avoid_print
+            print('[NotificationScheduler] Critical alert scheduled — ${criticalSubjects.length} subjects.');
+          }
         }
       }
-
-      // ignore: avoid_print
-      print('[NotificationScheduler] Critical alert scheduled — ${criticalSubjects.length} subjects.');
     }
   }
 
