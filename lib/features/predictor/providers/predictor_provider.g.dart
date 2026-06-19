@@ -94,6 +94,42 @@ final whatIfResultProvider = AutoDisposeProvider<double?>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef WhatIfResultRef = AutoDisposeProviderRef<double?>;
+String _$bunkBankHash() => r'428ae2258f37f4732b47acd4fb40074645f3d353';
+
+/// See also [bunkBank].
+@ProviderFor(bunkBank)
+final bunkBankProvider = AutoDisposeProvider<List<BunkBankEntry>>.internal(
+  bunkBank,
+  name: r'bunkBankProvider',
+  debugGetCreateSourceHash:
+      const bool.fromEnvironment('dart.vm.product') ? null : _$bunkBankHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef BunkBankRef = AutoDisposeProviderRef<List<BunkBankEntry>>;
+String _$tomorrowOpportunitiesHash() =>
+    r'9dd57fe3af6757687d99efdc68f96a5a2d03bb04';
+
+/// See also [tomorrowOpportunities].
+@ProviderFor(tomorrowOpportunities)
+final tomorrowOpportunitiesProvider =
+    AutoDisposeProvider<List<TomorrowOpportunity>>.internal(
+  tomorrowOpportunities,
+  name: r'tomorrowOpportunitiesProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$tomorrowOpportunitiesHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef TomorrowOpportunitiesRef
+    = AutoDisposeProviderRef<List<TomorrowOpportunity>>;
 String _$whatIfNotifierHash() => r'c6d9f8950f62dcee01351e0fa8d961c720e20fba';
 
 /// See also [WhatIfNotifier].

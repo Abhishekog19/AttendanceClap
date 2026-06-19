@@ -149,5 +149,38 @@ class NotificationPreferencesRepository {
 
   String _dateKey(DateTime date) =>
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-}
 
+  // ── Daily critical attendance deduplication ───────────────────────────────
+  // Separate from the danger warning so both can fire independently on the
+  // same day (a subject below the critical threshold is also below danger).
+
+  DocumentReference<Map<String, dynamic>> get _dailyCriticalDoc => _firestore
+      .collection('users')
+      .doc(_uid)
+      .collection('notification_alert_state')
+      .doc('daily_critical');
+
+  /// Returns true if a critical attendance notification was already generated
+  /// today. Uses a stable date-key to prevent same-day duplicates.
+  Future<bool> hasCriticalFiredToday() async {
+    if (_uid.isEmpty) return false;
+    try {
+      final doc = await _dailyCriticalDoc.get();
+      if (!doc.exists) return false;
+      final lastFired = doc.data()?['lastFiredDate'] as String?;
+      final todayKey = _dateKey(DateTime.now());
+      return lastFired == todayKey;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Records that today's critical attendance notification was sent.
+  Future<void> recordDailyCriticalFired() async {
+    if (_uid.isEmpty) return;
+    await _dailyCriticalDoc.set({
+      'lastFiredDate': _dateKey(DateTime.now()),
+      'firedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+}

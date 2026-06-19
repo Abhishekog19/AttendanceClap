@@ -197,4 +197,34 @@ class AppNotificationRepository {
     final doc = await _notificationsCol(_uid).doc(notificationId).get();
     return doc.exists;
   }
+
+  // ── Clear all ─────────────────────────────────────────────────────────────
+
+  /// Permanently deletes ALL notifications for the current user.
+  /// Executes in batch pages of 400 to stay within Firestore write limits.
+  /// This is a destructive, irreversible operation — always confirm before calling.
+  Future<void> clearAll() async {
+    // Capture the uid once before the loop begins so that an auth change
+    // mid-deletion cannot redirect later batches to a different user's account.
+    final uid = _uid;
+    if (uid.isEmpty) return;
+
+    DocumentSnapshot? lastDoc;
+    while (true) {
+      var query = _notificationsCol(uid).limit(400);
+      if (lastDoc != null) query = query.startAfterDocument(lastDoc);
+
+      final snap = await query.get();
+      if (snap.docs.isEmpty) break;
+
+      final batch = _firestore.batch();
+      for (final doc in snap.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      if (snap.docs.length < 400) break;
+      lastDoc = snap.docs.last;
+    }
+  }
 }

@@ -309,6 +309,38 @@ class _NotificationSettingsScreenState
                   ),
                   _divider(borderColor),
                   _switchTile(
+                    icon: Icons.crisis_alert_outlined,
+                    title: 'Critical Attendance Alert',
+                    subtitle: 'Separate high-priority alert for critically low attendance',
+                    value: _local.criticalAttendanceEnabled,
+                    primary: primary,
+                    onSurface: onSurface,
+                    onSurfaceVariant: onSurfaceVariant,
+                    enabled: _local.notificationsEnabled,
+                    onChanged: (v) => _patch(
+                        (p) => p.copyWith(criticalAttendanceEnabled: v)),
+                  ),
+                  _divider(borderColor),
+                  _sliderTile(
+                    icon: Icons.thermostat_outlined,
+                    title: 'Critical Threshold',
+                    subtitle: 'Alert fires when attendance drops below this %',
+                    value: _local.criticalThreshold,
+                    min: 50,
+                    max: 80,
+                    divisions: 30,
+                    onSurface: onSurface,
+                    onSurfaceVariant: onSurfaceVariant,
+                    primary: primary,
+                    enabled: _local.criticalAttendanceEnabled &&
+                        _local.notificationsEnabled,
+                    onChanged: (v) =>
+                        setState(() => _local = _local.copyWith(criticalThreshold: v)),
+                    onChangeEnd: (v) =>
+                        _patch((p) => p.copyWith(criticalThreshold: v)),
+                  ),
+                  _divider(borderColor),
+                  _switchTile(
                     icon: Icons.trending_up_outlined,
                     title: 'Recovery Suggestions',
                     subtitle: 'How many classes to attend to recover',
@@ -390,76 +422,6 @@ class _NotificationSettingsScreenState
                     enabled: _local.safeBunkPlannerEnabled && _local.notificationsEnabled,
                     onChanged: (v) =>
                         _patch((p) => p.copyWith(includeRiskSubjects: v)),
-                  ),
-                ]),
-                const SizedBox(height: AppSpacing.lg),
-
-                // ─── Daily Summary ────────────────────────────────────────────
-                _sectionLabel('Daily Summary', isDark),
-                const SizedBox(height: AppSpacing.sm),
-                _card(isDark, cardBg, borderColor, [
-                  _switchTile(
-                    icon: Icons.summarize_outlined,
-                    title: 'Daily Summary',
-                    subtitle: 'End-of-day attendance overview',
-                    value: _local.dailySummaryEnabled,
-                    primary: primary,
-                    onSurface: onSurface,
-                    onSurfaceVariant: onSurfaceVariant,
-                    enabled: _local.notificationsEnabled,
-                    onChanged: (v) =>
-                        _patch((p) => p.copyWith(dailySummaryEnabled: v)),
-                  ),
-                  _divider(borderColor),
-                  _timeTile(
-                    icon: Icons.nights_stay_outlined,
-                    title: 'Summary Time',
-                    time: _local.summaryTime,
-                    primary: primary,
-                    onSurface: onSurface,
-                    onSurfaceVariant: onSurfaceVariant,
-                    enabled: _local.dailySummaryEnabled && _local.notificationsEnabled,
-                    onTap: () => _pickTime(
-                      initial: _local.summaryTime,
-                      onPicked: (t) =>
-                          _patch((p) => p.copyWith(summaryTime: t)),
-                    ),
-                  ),
-                  _divider(borderColor),
-                  _switchTile(
-                    icon: Icons.check_circle_outline,
-                    title: 'Classes Attended',
-                    value: _local.includeClassesAttended,
-                    primary: primary,
-                    onSurface: onSurface,
-                    onSurfaceVariant: onSurfaceVariant,
-                    enabled: _local.dailySummaryEnabled && _local.notificationsEnabled,
-                    onChanged: (v) =>
-                        _patch((p) => p.copyWith(includeClassesAttended: v)),
-                  ),
-                  _divider(borderColor),
-                  _switchTile(
-                    icon: Icons.cancel_outlined,
-                    title: 'Classes Missed',
-                    value: _local.includeClassesMissed,
-                    primary: primary,
-                    onSurface: onSurface,
-                    onSurfaceVariant: onSurfaceVariant,
-                    enabled: _local.dailySummaryEnabled && _local.notificationsEnabled,
-                    onChanged: (v) =>
-                        _patch((p) => p.copyWith(includeClassesMissed: v)),
-                  ),
-                  _divider(borderColor),
-                  _switchTile(
-                    icon: Icons.bar_chart_outlined,
-                    title: 'Overall Attendance %',
-                    value: _local.includeOverallAttendance,
-                    primary: primary,
-                    onSurface: onSurface,
-                    onSurfaceVariant: onSurfaceVariant,
-                    enabled: _local.dailySummaryEnabled && _local.notificationsEnabled,
-                    onChanged: (v) => _patch(
-                        (p) => p.copyWith(includeOverallAttendance: v)),
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
@@ -726,4 +688,62 @@ class _NotificationSettingsScreenState
     final period = t.period == DayPeriod.am ? 'AM' : 'PM';
     return '$hour:$min $period';
   }
+
+  Widget _sliderTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required double value,
+    required double min,
+    required double max,
+    required int divisions,
+    required Color primary,
+    required Color onSurface,
+    required Color onSurfaceVariant,
+    bool enabled = true,
+    required ValueChanged<double> onChanged,
+    ValueChanged<double>? onChangeEnd,
+  }) =>
+      ListTile(
+        leading: Icon(icon,
+            color: enabled ? onSurface : onSurface.withAlpha(80)),
+        title: Text(title,
+            style: AppTextStyles.bodyLg.copyWith(
+                color: enabled ? onSurface : onSurface.withAlpha(80))),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(subtitle,
+                style: AppTextStyles.bodySm
+                    .copyWith(color: enabled ? onSurfaceVariant : onSurfaceVariant.withAlpha(80))),
+            Row(
+              children: [
+                Expanded(
+                  child: Slider(
+                    value: value,
+                    min: min,
+                    max: max,
+                    divisions: divisions,
+                    activeColor: enabled ? primary : primary.withAlpha(80),
+                    onChanged: enabled ? onChanged : null,
+                    onChangeEnd: enabled ? onChangeEnd : null,
+                  ),
+                ),
+                SizedBox(
+                  width: 44,
+                  child: Text(
+                    '${value.toStringAsFixed(0)}%',
+                    style: AppTextStyles.bodyMd.copyWith(
+                        color: enabled ? primary : primary.withAlpha(80),
+                        fontWeight: FontWeight.w600),
+                    textAlign: TextAlign.end,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      );
 }

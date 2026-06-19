@@ -12,6 +12,7 @@ import '../../../shared/widgets/loading_skeleton.dart';
 import '../../../shared/widgets/empty_state_widget.dart';
 import '../providers/dashboard_provider.dart';
 import '../widgets/hero_attendance_card.dart';
+import '../widgets/recent_notifications_card.dart';
 import '../widgets/subject_card.dart';
 
 class DashboardScreen extends ConsumerWidget {
@@ -178,6 +179,10 @@ class DashboardScreen extends ConsumerWidget {
                               ),
                             ),
                           ),
+
+                    // ── Recent Notifications ──────────────────────────────
+                    const SizedBox(height: AppSpacing.md),
+                    const RecentNotificationsCard(),
                   ]),
                 ),
               ),

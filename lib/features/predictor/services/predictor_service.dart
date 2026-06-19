@@ -328,7 +328,221 @@ class PredictorService {
     return counts;
   }
 
-  /// Counts future sessions in [range] per subject, generated from entries.
+  // ─── Feature V2: Safe-Until Date ──────────────────────────────────────────
+
+  /// Returns the date of the last lecture a student can safely skip for
+  /// [prediction] and still remain at or above [goal]%.
+  ///
+  /// Algorithm:
+  ///   Walk future occurrences of the subject (from tomorrow onward).
+  ///   The student has [safeBunks] skips available.
+  ///   The last available skip date is the [safeBunks]-th future occurrence.
+  ///
+  /// Returns null when [safeBunks] == 0.
+  static DateTime? safeUntilDate({
+    required SubjectPrediction prediction,
+    required List<TimetableEntry> entries,
+    required Semester semester,
+  }) {
+    if (prediction.safeBunks <= 0) return null;
+
+    final now = DateTime.now();
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+
+    // Collect future dates for this subject in order
+    final futureDates = _futureOccurrencesForSubject(
+      subjectName: prediction.name,
+      entries: entries,
+      semester: semester,
+      from: tomorrow,
+    );
+
+    if (futureDates.isEmpty) return null;
+
+    // The [safeBunks]-th date (1-indexed) is the last safe skip
+    final idx = prediction.safeBunks - 1;
+    if (idx >= futureDates.length) {
+      // Can skip ALL remaining — last available occurrence
+      return futureDates.last;
+    }
+    return futureDates[idx];
+  }
+
+  // ─── Feature V2: Tomorrow Opportunities ─────────────────────────────────────
+
+  /// Returns the attendance opportunity classification for every lecture
+  /// scheduled tomorrow.
+  ///
+  /// A lecture is [TomorrowSafety.safeToSkip] when the matching subject
+  /// has more than 1 safe bunk remaining (keeping a buffer of ≥ 1 after).
+  /// Otherwise it is [TomorrowSafety.attendRecommended].
+  ///
+  /// Returns an empty list when no classes are scheduled tomorrow.
+  static List<TomorrowOpportunity> tomorrowOpportunities({
+    required List<SubjectPrediction> predictions,
+    required List<TimetableEntry> entries,
+    required Semester semester,
+  }) {
+    final now = DateTime.now();
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+
+    // Map weekday number → day name (matching timetable entry format)
+    final tomorrowDayName = _days[tomorrow.weekday - 1];
+
+    // Check tomorrow is within the semester range
+    if (tomorrow.isBefore(semester.startDate) ||
+        tomorrow.isAfter(semester.endDate)) {
+      return [];
+    }
+    // Skip if tomorrow is a holiday
+    if (semester.isHoliday(tomorrow)) return [];
+
+    // Get entries for tomorrow's weekday
+    final tomorrowEntries =
+        entries.where((e) => e.day == tomorrowDayName).toList();
+    if (tomorrowEntries.isEmpty) return [];
+
+    // Build lookup: trimmed subject name → prediction
+    final predMap = {
+      for (final p in predictions) p.subject.name.trim(): p,
+    };
+
+    // Track remaining bunks per subject as we iterate, so that multiple
+    // lectures of the same subject each consume from the same decrementing
+    // counter rather than all reading the same static pred.safeBunks value.
+    final remainingBunks = <String, int>{
+      for (final p in predictions) p.subject.name.trim(): p.safeBunks,
+    };
+
+    final result = <TomorrowOpportunity>[];
+    for (final entry in tomorrowEntries) {
+      final subjectKey = entry.subject.trim();
+      final pred = predMap[subjectKey];
+      final bunksLeft = remainingBunks[subjectKey] ?? 0;
+
+      // Safe to skip only when the subject still has > 1 bunk remaining
+      // (keeps at least 1 buffer). Uses the decremented per-iteration counter,
+      // not the static pred.safeBunks, so subsequent lectures of the same
+      // subject correctly reflect the reduced availability.
+      final safety = (pred != null && bunksLeft > 1)
+          ? TomorrowSafety.safeToSkip
+          : TomorrowSafety.attendRecommended;
+
+      result.add(TomorrowOpportunity(
+        subjectName: entry.subject,
+        startTime: entry.startTime,
+        endTime: entry.endTime,
+        safety: safety,
+        safeBunksRemaining: bunksLeft,
+      ));
+
+      // Consume one bunk for this subject if it was marked safe to skip
+      if (safety == TomorrowSafety.safeToSkip) {
+        remainingBunks[subjectKey] = bunksLeft - 1;
+      }
+    }
+
+    // Sort: safe-to-skip first, then by start time
+    result.sort((a, b) {
+      final cmp = a.safety.index.compareTo(b.safety.index);
+      if (cmp != 0) return cmp;
+      return a.startTime.compareTo(b.startTime);
+    });
+
+    return result;
+  }
+
+  // ─── Feature V2: Recovery Date ───────────────────────────────────────────────
+
+  /// Calculates the earliest date at which a student recovers above [goal]%
+  /// for a subject that dropped below goal during a leave period.
+  ///
+  /// Starting state: [impact.pctAfter] → attended = [attended] out of [total + missed]
+  /// Recovery: add 1 attended + 1 total per future occurrence of the subject
+  /// until attendance >= goal.
+  ///
+  /// Returns null if recovery is not possible within the semester.
+  static DateTime? recoveryDate({
+    required SubjectLeaveImpact impact,
+    required SubjectPrediction prediction,
+    required List<TimetableEntry> entries,
+    required Semester semester,
+    required DateTime leaveEnd,
+    required double goal,
+  }) {
+    if (impact.pctAfter >= goal) return null; // Already above goal — no recovery needed
+
+    final startFrom = DateTime(
+      leaveEnd.year,
+      leaveEnd.month,
+      leaveEnd.day + 1,
+    );
+
+    final futureDates = _futureOccurrencesForSubject(
+      subjectName: prediction.name,
+      entries: entries,
+      semester: semester,
+      from: startFrom,
+    );
+
+    if (futureDates.isEmpty) return null;
+
+    // Current state after leave
+    int attended = prediction.attended;
+    int total = prediction.total + impact.missedCount;
+    final required = goal / 100;
+
+    for (final date in futureDates) {
+      attended += 1;
+      total += 1;
+      final pct = total == 0 ? 0.0 : attended / total;
+      if (pct >= required) return date;
+    }
+
+    return null; // Not recoverable within semester
+  }
+
+  // ─── Private: future occurrence list ─────────────────────────────────────────
+
+  /// Returns a sorted list of future dates on which [subjectName] is scheduled,
+  /// from [from] (inclusive) to [semester.endDate] (inclusive).
+  static List<DateTime> _futureOccurrencesForSubject({
+    required String subjectName,
+    required List<TimetableEntry> entries,
+    required Semester semester,
+    required DateTime from,
+  }) {
+    final trimmedName = subjectName.trim();
+    final subjectEntries =
+        entries.where((e) => e.subject.trim() == trimmedName).toList();
+    if (subjectEntries.isEmpty) return [];
+
+    // Use a List (not Set) so that a subject with 2 entries on the same day
+    // correctly contributes 2 occurrences per date.
+    final allDates = <DateTime>[];
+    for (int i = 0; i < _days.length; i++) {
+      final day = _days[i];
+      final weekday = i + 1;
+      final entriesOnDay = subjectEntries.where((e) => e.day == day).toList();
+      if (entriesOnDay.isEmpty) continue;
+
+      final dates = semester
+          .getDatesForWeekday(weekday)
+          .where((d) => !d.isBefore(from))
+          .toList();
+
+      for (final date in dates) {
+        // One occurrence per timetable entry on that day
+        for (int j = 0; j < entriesOnDay.length; j++) {
+          allDates.add(date);
+        }
+      }
+    }
+
+    allDates.sort();
+    return allDates;
+  }
+
   static Map<String, int> _countMissedInRange(
     List<TimetableEntry> entries,
     Semester semester,
@@ -427,4 +641,43 @@ class WhatIfBreakdown {
 
   double get diff => predictedPct - (attendedSoFar /
       (totalLectures - missedClasses == 0 ? 1 : totalLectures - missedClasses) * 100);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Predictor V2 Models
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Whether a tomorrow lecture is safe to skip or should be attended.
+enum TomorrowSafety {
+  /// Student has sufficient bunk buffer — skipping is safe.
+  safeToSkip,
+
+  /// Student is at or near the limit — attendance strongly advised.
+  attendRecommended;
+
+  String get label => switch (this) {
+        TomorrowSafety.safeToSkip => 'Safe to Skip',
+        TomorrowSafety.attendRecommended => 'Attend Recommended',
+      };
+}
+
+/// A single lecture entry for tomorrow's opportunity list.
+class TomorrowOpportunity {
+  final String subjectName;
+  final String startTime;
+  final String endTime;
+  final TomorrowSafety safety;
+
+  /// How many safe bunks the student still has for this subject.
+  final int safeBunksRemaining;
+
+  const TomorrowOpportunity({
+    required this.subjectName,
+    required this.startTime,
+    required this.endTime,
+    required this.safety,
+    required this.safeBunksRemaining,
+  });
+
+  bool get isSafe => safety == TomorrowSafety.safeToSkip;
 }

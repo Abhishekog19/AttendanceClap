@@ -5,8 +5,8 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../../../data/models/class_session_model.dart';
 import '../../../data/models/subject_model.dart';
-import '../models/notification_preferences_model.dart';
 import '../models/app_notification_model.dart';
+import '../models/notification_preferences_model.dart';
 import '../repositories/app_notification_repository.dart';
 import '../repositories/notification_preferences_repository.dart';
 import '../services/notification_channels.dart';
@@ -17,6 +17,15 @@ import '../services/notification_service.dart';
 //
 // Coordinates scheduling / cancellation of all notification types.
 // Stateless — all methods are pure functions over their inputs.
+//
+// Persistent types (Firestore notification center):
+//   attendanceDanger    — checkDailyAttendanceAlerts()
+//   criticalAttendance  — checkDailyAttendanceAlerts()
+//   nightlyBunkPlanner  — scheduleSafeBunkPlanner()
+//
+// Device-only types (system tray only, NOT stored):
+//   classReminders      — scheduleClassReminders()
+//   attendanceActions   — scheduleAttendanceReminders()
 // ─────────────────────────────────────────────────────────────────────────────
 
 class NotificationScheduler {
@@ -36,35 +45,39 @@ class NotificationScheduler {
     required double attendanceGoal, // from UserModel.attendanceGoal
     required NotificationPreferencesRepository alertRepo,
     AppNotificationRepository? notificationRepo,
+    required String currentUserId,
+    Set<String> tomorrowSubjectIds = const {},
   }) async {
     if (!prefs.notificationsEnabled) {
       await _svc.cancelAll();
       return;
     }
 
-    await scheduleClassReminders(
-        sessions: todaySessions, prefs: prefs);
-    await scheduleAttendanceReminders(
-        sessions: todaySessions, prefs: prefs);
+    await scheduleClassReminders(sessions: todaySessions, prefs: prefs);
+    await scheduleAttendanceReminders(sessions: todaySessions, prefs: prefs);
     await scheduleSafeBunkPlanner(
-        sessions: todaySessions,
-        subjects: subjects,
-        attendanceGoal: attendanceGoal,
-        prefs: prefs);
-    await scheduleDailySummary(
-        sessions: todaySessions,
-        subjects: subjects,
-        prefs: prefs);
-    await checkDailyAttendanceWarning(
-        sessions: todaySessions,
-        subjects: subjects,
-        attendanceGoal: attendanceGoal,
-        prefs: prefs,
-        repo: alertRepo,
-        notificationRepo: notificationRepo);
+      sessions: todaySessions,
+      subjects: subjects,
+      attendanceGoal: attendanceGoal,
+      prefs: prefs,
+      tomorrowSubjectIds: tomorrowSubjectIds,
+      currentUserId: currentUserId,
+      notificationRepo: notificationRepo,
+    );
+    // Daily Summary was removed — cancel any stale device notification.
+    await _svc.cancelNotification(NotificationChannels.summaryNotificationId);
+    await checkDailyAttendanceAlerts(
+      sessions: todaySessions,
+      subjects: subjects,
+      attendanceGoal: attendanceGoal,
+      prefs: prefs,
+      repo: alertRepo,
+      notificationRepo: notificationRepo,
+      currentUserId: currentUserId,
+    );
   }
 
-  // ── Type 1: Class Reminders ───────────────────────────────────────────────
+  // ── Type 1: Class Reminders (device-only) ────────────────────────────────
 
   Future<void> scheduleClassReminders({
     required List<ClassSession> sessions,
@@ -90,20 +103,15 @@ class NotificationScheduler {
     final toRemind = <ClassSession>[];
 
     if (prefs.onlyFirstClassReminder) {
-      // Only schedule the first class of the day
       final first = unmarked.firstOrNull;
       if (first != null) toRemind.add(first);
     } else {
       for (int i = 0; i < unmarked.length; i++) {
         if (i == 0) {
-          // Always include first
           toRemind.add(unmarked[i]);
         } else if (prefs.gapClassRemindersEnabled) {
-          // Include if gap from previous session is >= gapMinutes
-          final prevEnd =
-              _parseMinutes(unmarked[i - 1].displayEndTime);
-          final currStart =
-              _parseMinutes(unmarked[i].displayStartTime);
+          final prevEnd = _parseMinutes(unmarked[i - 1].displayEndTime);
+          final currStart = _parseMinutes(unmarked[i].displayStartTime);
           if (currStart - prevEnd >= prefs.gapMinutes) {
             toRemind.add(unmarked[i]);
           }
@@ -116,17 +124,12 @@ class NotificationScheduler {
       final reminderMin = startMin - prefs.reminderMinutes;
       final reminderTime = _todayAtMinutes(reminderMin, now);
 
-      // Skip if already in the past
       if (reminderTime.isBefore(now)) continue;
-
-      // Skip quiet hours
       if (prefs.isQuietHour(reminderTime)) continue;
 
       final isFirst = session == unmarked.first;
       final id = stableNotificationId('reminder_${session.id}_$dateKey') + 10000;
 
-      // N5 FIX: Use consistent title+body pairs for first vs non-first class.
-      // Before: both used the same body text; first-class title was misleading.
       final title = isFirst
           ? '📚 First class today'
           : '📚 ${session.displaySubjectName}';
@@ -153,7 +156,7 @@ class NotificationScheduler {
     }
   }
 
-  // ── Type 2: Attendance Marking Reminders ──────────────────────────────────
+  // ── Type 2: Attendance Marking Reminders (device-only) ───────────────────
 
   Future<void> scheduleAttendanceReminders({
     required List<ClassSession> sessions,
@@ -172,9 +175,7 @@ class NotificationScheduler {
       final fireMin = endMin + prefs.attendanceDelayMinutes;
       final fireTime = _todayAtMinutes(fireMin, now);
 
-      // Skip already past
       if (fireTime.isBefore(now)) continue;
-      // Skip quiet hours
       if (prefs.isQuietHour(fireTime)) continue;
 
       final id =
@@ -212,170 +213,216 @@ class NotificationScheduler {
     }
   }
 
-  // ── Type 3: Daily Aggregated Attendance Warning ───────────────────────────
+  // ── Type 3: Daily Attendance Alerts (Firestore + device) ─────────────────
   //
-  // Generates AT MOST ONE warning per day, combining all below-threshold
-  // subjects into a single notification. Fires 2h after the last session ends.
-  // Subjects with 0% attendance (totalClasses == 0) are excluded.
+  // Generates AT MOST ONE danger warning per day AND AT MOST ONE critical
+  // warning per day. Both are stored in the notification center.
+  // Danger:   attendance < attendanceGoal
+  // Critical: attendance < prefs.criticalThreshold (configurable, e.g. 65%)
 
-  Future<void> checkDailyAttendanceWarning({
+  Future<void> checkDailyAttendanceAlerts({
     required List<ClassSession> sessions,
     required List<SubjectModel> subjects,
     required double attendanceGoal,
     required NotificationPreferences prefs,
     required NotificationPreferencesRepository repo,
     AppNotificationRepository? notificationRepo,
+    required String currentUserId,
   }) async {
-    if (!prefs.lowAttendanceAlertsEnabled) return;
-
-    // Dedup: only fire once per day
-    final alreadyFiredToday = await repo.hasWarningFiredToday();
-    if (alreadyFiredToday) {
-      // ignore: avoid_print
-      print('[NotificationScheduler] Daily warning already fired today — skipping.');
-      return;
-    }
-
-    // Filter subjects: must have classes AND be below threshold
-    final lowSubjects = subjects.where((s) {
-      if (s.totalClasses == 0) return false; // Skip 0% (no data)
-      return s.attendancePercentage < attendanceGoal;
-    }).toList();
-
-    if (lowSubjects.isEmpty) return;
-
-    // Build aggregated message
-    final lines = lowSubjects.map((s) {
-      final classesNeeded = _classesNeededToRecover(
-        attended: s.attendedClasses,
-        total: s.totalClasses,
-        target: attendanceGoal / 100,
-      );
-      return '• ${s.name} → Attend next $classesNeeded class${classesNeeded == 1 ? '' : 'es'}';
-    }).join('\n');
-
-    final title = '📊 Attendance Alert';
-    final body = 'The following subjects are below your target:\n\n$lines';
-
-    // Determine fire time: 2h after last session ends today
     final now = DateTime.now();
-    DateTime fireTime;
-
-    if (sessions.isNotEmpty) {
-      // Find the latest end time among today's non-cancelled sessions
-      final latestEndMinutes = sessions
-          .where((s) => !s.isCancelled)
-          .map((s) => _parseMinutes(s.displayEndTime))
-          .fold(0, (max, v) => v > max ? v : max);
-
-      final lastSessionEnd = _todayAtMinutes(latestEndMinutes, now);
-      // Schedule 2h after last session, but no earlier than 5 minutes from now
-      fireTime = lastSessionEnd.add(const Duration(hours: 2));
-      if (fireTime.isBefore(now.add(const Duration(minutes: 5)))) {
-        fireTime = now.add(const Duration(minutes: 5));
-      }
-    } else {
-      // No sessions today — fire in 5 minutes as a fallback
-      fireTime = now.add(const Duration(minutes: 5));
-    }
-
-    // Skip quiet hours
-    if (prefs.isQuietHour(fireTime)) {
-      // ignore: avoid_print
-      print('[NotificationScheduler] Warning suppressed — quiet hours.');
-      return;
-    }
-
-    // Stable notification ID for today (avoids duplicates on system tray)
     final dateKey = _dateKey(now);
-    final notifId = stableNotificationId('daily_warning_$dateKey') + 50000;
 
-    await _svc.scheduleOnce(
-      id: notifId,
-      title: title,
-      body: body,
-      scheduledDate: tz.TZDateTime.from(fireTime, tz.local),
-      channelId: NotificationChannels.attendanceAlerts,
-      channelName: 'Attendance Alerts',
-      bigText: true,
-    );
+    // ── Danger warning (below attendanceGoal) ───────────────────────────────
 
-    // N1 FIX: Record the dedup flag BEFORE writing the notification.
-    // Previously the flag was set AFTER the write, so two concurrent scheduler
-    // calls could both pass the hasWarningFiredToday() check before either set
-    // the flag — resulting in duplicate Firestore notification documents.
-    // Setting it first ensures idempotency: if a second call runs before the
-    // first finishes, it will see the flag already set and skip.
-    await repo.recordDailyWarningFired();
+    if (prefs.lowAttendanceAlertsEnabled) {
+      final alreadyFiredToday = await repo.hasWarningFiredToday();
+      if (!alreadyFiredToday) {
+        final lowSubjects = subjects.where((s) {
+          if (s.totalClasses == 0) return false;
+          return s.attendancePercentage < attendanceGoal;
+        }).toList();
 
-    // Record in Firestore notification center (if repo provided)
-    if (notificationRepo != null) {
-      final centerId = 'attendanceWarning_$dateKey';
-      final alreadyStored = await notificationRepo.notificationExists(centerId);
-      if (!alreadyStored) {
-        await notificationRepo.addNotification(AppNotificationModel(
-          id: centerId,
-          title: title,
-          message: body,
-          type: AppNotificationType.attendanceWarning,
-          createdAt: DateTime.now(),
-          isRead: false,
-        ));
+        if (lowSubjects.isNotEmpty) {
+          final lines = lowSubjects.map((s) {
+            final classesNeeded = _classesNeededToRecover(
+              attended: s.attendedClasses,
+              total: s.totalClasses,
+              target: attendanceGoal / 100,
+            );
+            return '• ${s.name} → Attend next $classesNeeded class${classesNeeded == 1 ? '' : 'es'}';
+          }).join('\n');
+
+          const title = '📊 Attendance Alert';
+          final body =
+              'The following subjects are below your target:\n\n$lines';
+
+          DateTime fireTime = _computeFireTime(sessions, now);
+          if (!prefs.isQuietHour(fireTime)) {
+            final dangerNotifId =
+                stableNotificationId('daily_danger_$dateKey') + 50000;
+
+            await _svc.scheduleOnce(
+              id: dangerNotifId,
+              title: title,
+              body: body,
+              scheduledDate: tz.TZDateTime.from(fireTime, tz.local),
+              channelId: NotificationChannels.attendanceAlerts,
+              channelName: 'Attendance Alerts',
+              bigText: true,
+            );
+
+            // Record dedup flag BEFORE Firestore write to prevent race condition
+            await repo.recordDailyWarningFired();
+
+            if (notificationRepo != null && currentUserId.isNotEmpty) {
+              final centerId = 'attendanceDanger_$dateKey';
+              final alreadyStored =
+                  await notificationRepo.notificationExists(centerId);
+              if (!alreadyStored) {
+                await notificationRepo.addNotification(AppNotificationModel(
+                  id: centerId,
+                  userId: currentUserId,
+                  title: title,
+                  message: body,
+                  type: AppNotificationType.attendanceDanger,
+                  priority: NotificationPriority.high,
+                  createdAt: now,
+                  isRead: false,
+                ));
+              }
+            }
+
+            // ignore: avoid_print
+            print('[NotificationScheduler] Danger warning scheduled for $fireTime — ${lowSubjects.length} subjects.');
+          }
+        }
       }
     }
 
-    // ignore: avoid_print
-    print('[NotificationScheduler] Daily warning scheduled for $fireTime — ${lowSubjects.length} subjects.');
+    // ── Critical attendance alert (below criticalThreshold) ─────────────────
+
+    if (prefs.criticalAttendanceEnabled) {
+      final alreadyCriticalFiredToday = await repo.hasCriticalFiredToday();
+      if (alreadyCriticalFiredToday) {
+        // ignore: avoid_print
+        print('[NotificationScheduler] Critical alert already fired today — skipping.');
+      } else {
+
+        final criticalSubjects = subjects.where((s) {
+          if (s.totalClasses == 0) return false;
+          return s.attendancePercentage < prefs.criticalThreshold;
+        }).toList();
+
+        if (criticalSubjects.isNotEmpty) {
+          final criticalLines = criticalSubjects.map((s) {
+            return '• ${s.name} → ${s.attendancePercentage.toStringAsFixed(1)}%';
+          }).join('\n');
+
+          const criticalTitle = '🚨 Critical Attendance Alert';
+          final criticalBody =
+              'These subjects are critically low — immediate action required:\n\n$criticalLines';
+
+          // Critical fires immediately (5 min from now) — too urgent to wait
+          final criticalFireTime = now.add(const Duration(minutes: 5));
+
+          if (!prefs.isQuietHour(criticalFireTime)) {
+            final criticalNotifId =
+                stableNotificationId('daily_critical_$dateKey') + 60000;
+
+            await _svc.scheduleOnce(
+              id: criticalNotifId,
+              title: criticalTitle,
+              body: criticalBody,
+              scheduledDate: tz.TZDateTime.from(criticalFireTime, tz.local),
+              channelId: NotificationChannels.attendanceAlerts,
+              channelName: 'Attendance Alerts',
+              bigText: true,
+            );
+
+            // Record dedup flag before Firestore write
+            await repo.recordDailyCriticalFired();
+
+            if (notificationRepo != null && currentUserId.isNotEmpty) {
+              final centerId = 'criticalAttendance_$dateKey';
+              final alreadyStored =
+                  await notificationRepo.notificationExists(centerId);
+              if (!alreadyStored) {
+                await notificationRepo.addNotification(AppNotificationModel(
+                  id: centerId,
+                  userId: currentUserId,
+                  title: criticalTitle,
+                  message: criticalBody,
+                  type: AppNotificationType.criticalAttendance,
+                  priority: NotificationPriority.critical,
+                  createdAt: now,
+                  isRead: false,
+                ));
+              }
+            }
+
+            // ignore: avoid_print
+            print('[NotificationScheduler] Critical alert scheduled — ${criticalSubjects.length} subjects.');
+          }
+        }
+      }
+    }
   }
 
-  // ── Type 4: Safe Bunk Planner ─────────────────────────────────────────────
+  // ── Type 4: Nightly Bunk Planner (device + Firestore) ────────────────────
+  //
+  // Generates a consolidated nightly summary of subjects that are safe to bunk
+  // TOMORROW. Only subjects with safeBunks > 0 AND that have a lecture
+  // scheduled tomorrow are included. Fires at prefs.plannerTime (daily repeat).
 
   Future<void> scheduleSafeBunkPlanner({
     required List<ClassSession> sessions,
     required List<SubjectModel> subjects,
     required double attendanceGoal,
     required NotificationPreferences prefs,
+    Set<String> tomorrowSubjectIds = const {},
+    String currentUserId = '',
+    AppNotificationRepository? notificationRepo,
   }) async {
     if (!prefs.safeBunkPlannerEnabled) return;
 
     // Cancel previous planner notification
     await _svc.cancelNotification(NotificationChannels.plannerNotificationId);
 
-    // Build safe-bunk map from subject data
-    final safeBunksPerSubject = <String, int>{};
-    final riskSubjects = <String>[];
+    final now = DateTime.now();
+    final dateKey = _dateKey(now);
 
+    // Build the eligible safe-bunk list.
+    // Subject qualifies only if BOTH:
+    //   1. safeBunks > 0 (has buffer left)
+    //   2. subject.id ∈ tomorrowSubjectIds (has a lecture scheduled tomorrow)
+    // NOTE: if tomorrowSubjectIds is empty (no lectures tomorrow / no timetable),
+    // then NO subjects qualify — which is the correct, intended behaviour.
+    final eligible = <SubjectModel>[];
     for (final subject in subjects) {
       final bunks = _safeBunkCount(
         attended: subject.attendedClasses,
         total: subject.totalClasses,
         target: attendanceGoal / 100,
       );
-      safeBunksPerSubject[subject.name] = bunks;
-      if (bunks == 0 && prefs.includeRiskSubjects) {
-        riskSubjects.add(subject.name);
+      final hasTomorrowLecture = tomorrowSubjectIds.contains(subject.id);
+      if (bunks > 0 && hasTomorrowLecture) {
+        eligible.add(subject);
       }
     }
 
-    final hasBunks = safeBunksPerSubject.values.any((v) => v > 0);
+    final String title;
+    final String body;
 
-    final title = hasBunks
-        ? '🎉 Safe Bunks Available Tomorrow'
-        : '⚠️ No safe bunks available tomorrow';
-
-    String body;
-    if (!hasBunks) {
-      body = 'Stay on track — attend all classes tomorrow.';
+    if (eligible.isEmpty) {
+      title = "Tomorrow's Classes";
+      body = 'No safe bunks available tomorrow. Attend all scheduled lectures.';
     } else {
-      final entries = safeBunksPerSubject.entries
-          .where((e) => prefs.includeSafeBunks || e.value == 0)
-          .map((e) => e.value == 0
-              ? '${e.key} → No safe bunk'
-              : '${e.key} → ${e.value} safe bunk${e.value > 1 ? 's' : ''}')
-          .join('\n');
-      body = entries.isNotEmpty ? entries : 'Check app for details';
+      title = "Tomorrow's Bunk Opportunities 🎉";
+      final lines = eligible.map((s) => '• ${s.name}').join('\n');
+      body = 'You can safely skip:\n$lines\n\nAttend all other lectures.';
     }
 
+    // Schedule daily repeating device notification
     await _svc.scheduleDaily(
       id: NotificationChannels.plannerNotificationId,
       title: title,
@@ -385,46 +432,26 @@ class NotificationScheduler {
       channelName: 'Planning & Insights',
       bigText: true,
     );
-  }
 
-  // ── Type 5: Daily Summary ─────────────────────────────────────────────────
-
-  Future<void> scheduleDailySummary({
-    required List<ClassSession> sessions,
-    required List<SubjectModel> subjects,
-    required NotificationPreferences prefs,
-  }) async {
-    if (!prefs.dailySummaryEnabled) {
-      await _svc.cancelNotification(NotificationChannels.summaryNotificationId);
-      return;
+    // Write to Firestore notification center (persistent history)
+    if (notificationRepo != null && currentUserId.isNotEmpty) {
+      final centerId = 'nightlyBunkPlanner_$dateKey';
+      final alreadyStored = await notificationRepo.notificationExists(centerId);
+      if (!alreadyStored) {
+        await notificationRepo.addNotification(AppNotificationModel(
+          id: centerId,
+          userId: currentUserId,
+          title: title,
+          message: body,
+          type: AppNotificationType.nightlyBunkPlanner,
+          priority: NotificationPriority.low,
+          createdAt: now,
+          isRead: false,
+        ));
+        // ignore: avoid_print
+        print('[NotificationScheduler] Bunk planner stored in notification center — ${eligible.length} eligible subjects.');
+      }
     }
-
-    // Calculate today's stats
-    final attended =
-        sessions.where((s) => s.status == AttendanceStatus.present).length;
-    final missed =
-        sessions.where((s) => s.status == AttendanceStatus.absent).length;
-    final total = subjects.fold<int>(0, (s, sub) => s + sub.totalClasses);
-    final totalAttended =
-        subjects.fold<int>(0, (s, sub) => s + sub.attendedClasses);
-    final overall = total == 0 ? 0.0 : (totalAttended / total) * 100;
-
-    final bodyLines = <String>[];
-    if (prefs.includeClassesAttended) bodyLines.add('✅ Attended: $attended');
-    if (prefs.includeClassesMissed) bodyLines.add('❌ Missed: $missed');
-    if (prefs.includeOverallAttendance) {
-      bodyLines.add('Overall: ${overall.toStringAsFixed(1)}%');
-    }
-
-    await _svc.scheduleDaily(
-      id: NotificationChannels.summaryNotificationId,
-      title: "Today's Attendance Summary",
-      body: bodyLines.join('   '),
-      time: prefs.summaryTime,
-      channelId: NotificationChannels.planningInsights,
-      channelName: 'Planning & Insights',
-      bigText: true,
-    );
   }
 
   // ── Cancel today's reminders ──────────────────────────────────────────────
@@ -439,6 +466,31 @@ class NotificationScheduler {
     }
   }
 
+  // ── Fire time helper ──────────────────────────────────────────────────────
+
+  /// Computes the notification fire time: 2h after the last session ends.
+  /// Falls back to 5 minutes from now if there are no active sessions today.
+  static DateTime _computeFireTime(
+      List<ClassSession> sessions, DateTime now) {
+    // Filter to non-cancelled sessions first so that a day where every class
+    // is cancelled doesn't accidentally fold over an empty iterable and return
+    // a 0-minute baseline, which would yield an incorrect fire time.
+    final activeSessions = sessions.where((s) => !s.isCancelled).toList();
+    if (activeSessions.isNotEmpty) {
+      final latestEndMinutes = activeSessions
+          .map((s) => _parseMinutes(s.displayEndTime))
+          .fold(0, (max, v) => v > max ? v : max);
+
+      final lastSessionEnd = _todayAtMinutes(latestEndMinutes, now);
+      final fireTime = lastSessionEnd.add(const Duration(hours: 2));
+      if (fireTime.isBefore(now.add(const Duration(minutes: 5)))) {
+        return now.add(const Duration(minutes: 5));
+      }
+      return fireTime;
+    }
+    return now.add(const Duration(minutes: 5));
+  }
+
   // ── Safe bunk calculation ─────────────────────────────────────────────────
 
   /// Returns how many more classes can be missed while staying above [target].
@@ -448,8 +500,6 @@ class NotificationScheduler {
     required double target, // 0..1
   }) {
     if (total == 0) return 0;
-    // attended / (total + bunks) >= target
-    // => bunks <= attended/target - total
     final maxBunks = (attended / target) - total;
     return maxBunks < 0 ? 0 : maxBunks.floor();
   }
@@ -460,8 +510,6 @@ class NotificationScheduler {
     required int total,
     required double target, // 0..1
   }) {
-    // (attended + n) / (total + n) >= target
-    // => n(1 - target) >= target * total - attended
     final diff = target * total - attended;
     if (diff <= 0) return 0;
     final needed = (diff / (1 - target)).ceil();

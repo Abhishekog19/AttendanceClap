@@ -44,7 +44,7 @@ final unreadNotificationCountProvider = AutoDisposeStreamProvider<int>.internal(
 // ignore: unused_element
 typedef UnreadNotificationCountRef = AutoDisposeStreamProviderRef<int>;
 String _$notificationPaginationHash() =>
-    r'41a3d7fca0470a2eded74c60dea826480da72f43';
+    r'0fb764b3e9d01539f631cf8303dddbae5e8669dd';
 
 /// See also [NotificationPagination].
 @ProviderFor(NotificationPagination)
@@ -61,7 +61,7 @@ final notificationPaginationProvider = AutoDisposeNotifierProvider<
 
 typedef _$NotificationPagination = AutoDisposeNotifier<NotificationPageState>;
 String _$appNotificationNotifierHash() =>
-    r'7427154801430266c7772d42118b5b3188ba6907';
+    r'c768f5b3a2e3156a1c81e28b4f1fe77dc8e00acb';
 
 /// See also [AppNotificationNotifier].
 @ProviderFor(AppNotificationNotifier)

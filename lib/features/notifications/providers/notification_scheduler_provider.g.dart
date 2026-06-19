@@ -7,7 +7,7 @@ part of 'notification_scheduler_provider.dart';
 // **************************************************************************
 
 String _$notificationSchedulerWatcherHash() =>
-    r'ab505738fd7bb08f1964a0d42be774e730a63b00';
+    r'1f66077e6d9ac4c47b78564581dfea562d26c08c';
 
 /// See also [notificationSchedulerWatcher].
 @ProviderFor(notificationSchedulerWatcher)
