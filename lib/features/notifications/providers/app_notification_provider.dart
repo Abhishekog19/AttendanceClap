@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
@@ -76,6 +75,11 @@ class NotificationPageState {
 class NotificationPagination extends _$NotificationPagination {
   @override
   NotificationPageState build() {
+    // ACCOUNT ISOLATION FIX: watch auth so this notifier is disposed and
+    // rebuilt fresh when the user logs out/in. Without this, extraPageItems
+    // from Account A survive into Account B's session.
+    ref.watch(authStateChangesProvider);
+
     // Seed with the live first page from the stream
     ref.listen(appNotificationsProvider, (_, next) {
       final fresh = next.valueOrNull ?? [];
@@ -174,6 +178,9 @@ class AppNotificationNotifier extends _$AppNotificationNotifier {
     required String title,
     required String message,
     required AppNotificationType type,
+    required String userId,
+    NotificationPriority priority = NotificationPriority.normal,
+    String? payload,
   }) async {
     final exists = await _repo.notificationExists(stableId);
     if (exists) {
@@ -184,17 +191,26 @@ class AppNotificationNotifier extends _$AppNotificationNotifier {
 
     final notification = AppNotificationModel(
       id: stableId,
+      userId: userId,
       title: title,
       message: message,
       type: type,
       createdAt: DateTime.now(),
       isRead: false,
+      priority: priority,
+      payload: payload,
     );
 
     await _repo.addNotification(notification);
     // ignore: avoid_print
     print('[AppNotifications] Added: $stableId — $title');
     return true;
+  }
+
+  /// Permanently deletes ALL notifications for the current user.
+  /// Always show a confirmation dialog before calling this.
+  Future<void> clearAll() async {
+    await _repo.clearAll();
   }
 }
 

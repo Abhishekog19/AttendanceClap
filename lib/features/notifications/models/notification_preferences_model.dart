@@ -32,6 +32,10 @@ class NotificationPreferences {
   final bool lowAttendanceAlertsEnabled;
   final bool recoverySuggestionsEnabled;
 
+  // ── Critical Attendance ───────────────────────────────────────────────────────
+  final bool criticalAttendanceEnabled; // separate threshold alert
+  final double criticalThreshold;       // e.g. 65.0 — configurable by user
+
   // ── Safe Bunk Planner ─────────────────────────────────────────────────────────
   final bool safeBunkPlannerEnabled;
   final TimeOfDay plannerTime;
@@ -72,6 +76,10 @@ class NotificationPreferences {
     // Attendance Alerts
     this.lowAttendanceAlertsEnabled = true,
     this.recoverySuggestionsEnabled = true,
+
+    // Critical Attendance
+    this.criticalAttendanceEnabled = true,
+    this.criticalThreshold = 65.0,
 
     // Safe Bunk Planner
     this.safeBunkPlannerEnabled = true,
@@ -130,6 +138,8 @@ class NotificationPreferences {
         'autoDismissMinutes': autoDismissMinutes,
         'lowAttendanceAlertsEnabled': lowAttendanceAlertsEnabled,
         'recoverySuggestionsEnabled': recoverySuggestionsEnabled,
+        'criticalAttendanceEnabled': criticalAttendanceEnabled,
+        'criticalThreshold': criticalThreshold,
         'safeBunkPlannerEnabled': safeBunkPlannerEnabled,
         'plannerTimeHour': plannerTime.hour,
         'plannerTimeMinute': plannerTime.minute,
@@ -175,6 +185,8 @@ class NotificationPreferences {
       autoDismissMinutes: i('autoDismissMinutes', 0),
       lowAttendanceAlertsEnabled: b('lowAttendanceAlertsEnabled', true),
       recoverySuggestionsEnabled: b('recoverySuggestionsEnabled', true),
+      criticalAttendanceEnabled: b('criticalAttendanceEnabled', true),
+      criticalThreshold: (m['criticalThreshold'] as num?)?.toDouble() ?? 65.0,
       safeBunkPlannerEnabled: b('safeBunkPlannerEnabled', true),
       plannerTime: TimeOfDay(
         hour: i('plannerTimeHour', 22),
@@ -216,6 +228,8 @@ class NotificationPreferences {
     int? autoDismissMinutes,
     bool? lowAttendanceAlertsEnabled,
     bool? recoverySuggestionsEnabled,
+    bool? criticalAttendanceEnabled,
+    double? criticalThreshold,
     bool? safeBunkPlannerEnabled,
     TimeOfDay? plannerTime,
     bool? includeSafeBunks,
@@ -258,6 +272,9 @@ class NotificationPreferences {
           lowAttendanceAlertsEnabled ?? this.lowAttendanceAlertsEnabled,
       recoverySuggestionsEnabled:
           recoverySuggestionsEnabled ?? this.recoverySuggestionsEnabled,
+      criticalAttendanceEnabled:
+          criticalAttendanceEnabled ?? this.criticalAttendanceEnabled,
+      criticalThreshold: criticalThreshold ?? this.criticalThreshold,
       safeBunkPlannerEnabled:
           safeBunkPlannerEnabled ?? this.safeBunkPlannerEnabled,
       plannerTime: plannerTime ?? this.plannerTime,

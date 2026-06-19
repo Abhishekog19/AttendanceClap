@@ -87,12 +87,43 @@ class NotificationCenterScreen extends ConsumerWidget {
                 style: AppTextStyles.labelMd.copyWith(color: primary),
               ),
             ),
+          if (notifications.isNotEmpty)
+            IconButton(
+              icon: Icon(Icons.delete_sweep_outlined, color: onSurfaceVariant),
+              tooltip: 'Clear all',
+              onPressed: () => _confirmClearAll(context, ref),
+            ),
         ],
       ),
       body: body,
     );
   }
-}
+
+  Future<void> _confirmClearAll(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear All Notifications?'),
+        content: const Text(
+            'This will permanently delete all notifications. This action cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+                backgroundColor: AppColors.error),
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(appNotificationNotifierProvider.notifier).clearAll();
+    }
+  }
+} // end NotificationCenterScreen
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _NotificationList — grouped + paginated list
@@ -193,19 +224,15 @@ class _NotificationList extends ConsumerWidget {
     );
   }
 
-  // ── Grouping: Today / This Week / This Month / Older ─────────────────────
+  // ── Grouping + priority sort: Today / This Week / This Month / Older ──────
 
   Map<String, List<AppNotificationModel>> _groupNotifications(
       List<AppNotificationModel> notifications) {
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
-    // Subtract 7 days so weekStart is 7 days strictly before today.
-    // Using 6 days would include today in the "This Week" bucket (7-day window
-    // including today), which contradicts the "last 7 days, not today" spec.
     final weekStart = todayStart.subtract(const Duration(days: 7));
     final monthStart = DateTime(now.year, now.month, 1);
 
-    // Use LinkedHashMap insertion order to preserve display order
     final groups = <String, List<AppNotificationModel>>{
       'Today': [],
       'This Week': [],
@@ -226,7 +253,15 @@ class _NotificationList extends ConsumerWidget {
       }
     }
 
-    // Remove empty groups
+    // Within each group: sort by priority DESC (critical=3 first), then timestamp DESC
+    for (final key in groups.keys) {
+      groups[key]!.sort((a, b) {
+        final pc = b.priority.index.compareTo(a.priority.index);
+        if (pc != 0) return pc;
+        return b.createdAt.compareTo(a.createdAt);
+      });
+    }
+
     groups.removeWhere((_, list) => list.isEmpty);
     return groups;
   }
@@ -329,8 +364,28 @@ class _NotificationTile extends StatelessWidget {
                             ),
                           ),
                         ),
-                        // Unread dot
-                        if (!notification.isRead)
+                        // CRITICAL priority badge
+                        if (notification.priority == NotificationPriority.critical)
+                          Container(
+                            margin: const EdgeInsets.only(left: AppSpacing.xs),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.error,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'CRITICAL',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          )
+                        // Unread dot (shown when not critical)
+                        else if (!notification.isRead)
                           Container(
                             width: 8,
                             height: 8,
@@ -349,7 +404,7 @@ class _NotificationTile extends StatelessWidget {
                       style: AppTextStyles.bodySm.copyWith(
                         color: onSurfaceVariant,
                       ),
-                      maxLines: 3,
+                      maxLines: 5,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
@@ -372,23 +427,19 @@ class _NotificationTile extends StatelessWidget {
 
   IconData _typeIcon(AppNotificationType type) {
     return switch (type) {
-      AppNotificationType.attendanceWarning => Icons.warning_amber_rounded,
-      AppNotificationType.classReminder => Icons.schedule_rounded,
-      AppNotificationType.safeBunk => Icons.event_available_rounded,
-      AppNotificationType.delay => Icons.update_rounded,
-      AppNotificationType.subscription => Icons.workspace_premium_rounded,
-      AppNotificationType.system => Icons.info_outline_rounded,
+      AppNotificationType.attendanceDanger  => Icons.warning_amber_rounded,
+      AppNotificationType.criticalAttendance => Icons.crisis_alert_rounded,
+      AppNotificationType.nightlyBunkPlanner => Icons.event_available_rounded,
+      AppNotificationType.system             => Icons.info_outline_rounded,
     };
   }
 
   Color _typeColor(AppNotificationType type) {
     return switch (type) {
-      AppNotificationType.attendanceWarning => AppColors.warning,
-      AppNotificationType.classReminder => AppColors.primary,
-      AppNotificationType.safeBunk => AppColors.success,
-      AppNotificationType.delay => AppColors.tertiary,
-      AppNotificationType.subscription => AppColors.tertiary,
-      AppNotificationType.system => AppColors.onSurfaceVariant,
+      AppNotificationType.attendanceDanger   => AppColors.warning,
+      AppNotificationType.criticalAttendance => AppColors.error,
+      AppNotificationType.nightlyBunkPlanner => AppColors.success,
+      AppNotificationType.system             => AppColors.onSurfaceVariant,
     };
   }
 

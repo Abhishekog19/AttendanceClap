@@ -155,3 +155,80 @@ double? whatIfResult(Ref ref) {
 // Holds the Set of subject IDs the user has selected.
 // Empty → all subjects visible (default).
 final subjectFilterProvider = StateProvider<Set<String>>((ref) => const {});
+
+// =============================================================================
+// Predictor V2 Providers
+// =============================================================================
+
+// ─── Bunk Bank data (V2 hero card) ───────────────────────────────────────────
+//
+// Pure derivation — zero Firebase reads.
+// Rebuilds automatically whenever predictorDataProvider emits a new value
+// (i.e. when attendance is marked, subjects change, goal changes, etc.)
+
+/// Single entry in the Bunk Bank list.
+class BunkBankEntry {
+  final String subjectId;
+  final String subjectName;
+  final int safeBunks;
+
+  /// The date of the last lecture that can safely be skipped.
+  /// Null when no future classes are scheduled.
+  final DateTime? safeUntil;
+
+  const BunkBankEntry({
+    required this.subjectId,
+    required this.subjectName,
+    required this.safeBunks,
+    this.safeUntil,
+  });
+}
+
+@riverpod
+List<BunkBankEntry> bunkBank(Ref ref) {
+  final dataAsync = ref.watch(predictorDataProvider);
+  final data = dataAsync.valueOrNull;
+  if (data == null) return [];
+
+  final entries = <BunkBankEntry>[];
+
+  for (final pred in data.predictions) {
+    if (pred.safeBunks <= 0) continue; // Only subjects with remaining bunks
+
+    final until = PredictorService.safeUntilDate(
+      prediction: pred,
+      entries: data.entries,
+      semester: data.semester,
+    );
+
+    entries.add(BunkBankEntry(
+      subjectId: pred.subject.id,
+      subjectName: pred.name,
+      safeBunks: pred.safeBunks,
+      safeUntil: until,
+    ));
+  }
+
+  // Sort ascending by safeBunks so riskiest subjects appear first
+  entries.sort((a, b) => a.safeBunks.compareTo(b.safeBunks));
+  return entries;
+}
+
+// ─── Tomorrow Opportunities (V2 compact card) ─────────────────────────────────
+//
+// Pure derivation — zero Firebase reads.
+// Uses the same timetable source as the Schedule page.
+
+@riverpod
+List<TomorrowOpportunity> tomorrowOpportunities(Ref ref) {
+  final dataAsync = ref.watch(predictorDataProvider);
+  final data = dataAsync.valueOrNull;
+  if (data == null) return [];
+
+  return PredictorService.tomorrowOpportunities(
+    predictions: data.predictions,
+    entries: data.entries,
+    semester: data.semester,
+  );
+}
+
