@@ -1,102 +1,218 @@
 # AttendanceAI 🎓
 
-A production-ready Flutter application for smart student attendance tracking with AI-powered predictions.
+> Smart attendance tracking for college students. Know exactly how many classes you can miss — before you miss them.
 
-## ✨ Features
+Built with Flutter + Firebase + Riverpod, AttendanceAI takes the mental overhead out of attendance management. It tracks your attendance per subject, predicts whether you can safely bunk, and tells you exactly how many classes you need to attend to hit your target — in real time.
 
-- **Dashboard** — Overall attendance % with animated circular ring, safe bunks counter, "Can I Bunk Tomorrow?" predictor
-- **Subjects** — CRUD for subjects with real-time attendance % tracking
-- **Timetable** — Today's schedule with current class detection, mark present/absent buttons
-- **Predictor** — Simulate future attended/missed classes with instant % recalculation
-- **Analytics** — Attendance trends chart, subject comparison bars, activity heatmap
-- **Premium** — ₹20/month or ₹200/year pricing UI
-- **Profile** — Theme toggle, attendance goal slider, logout
+---
 
-## 🏗️ Architecture
+## The Problem
+
+Every college student has been there: you want to skip a class but you're not sure if you're safe. You do the mental math, second-guess yourself, and either go unnecessarily or skip and regret it later. Most students track attendance in their notes app or a spreadsheet, recalculate manually after every class, and never have a clear picture of where they actually stand.
+
+AttendanceAI solves this completely.
+
+---
+
+## Features
+
+### 🏠 Dashboard
+- Overall attendance percentage with an animated circular ring
+- Per-subject attendance at a glance
+- **Safe bunks counter** — how many classes you can still skip and stay above your target
+- **"Can I Bunk Tomorrow?" predictor** — instant yes/no based on your current standing
+- Pull-to-refresh for live updates
+
+### 📚 Subjects
+- Add, edit, and delete subjects
+- Real-time attendance percentage per subject
+- Track attended vs. total classes with auto-updating counters
+- Set per-subject attendance targets
+
+### 📅 Timetable
+- Weekly schedule management
+- **Today's schedule view** with current class detection — knows which class is happening right now
+- One-tap mark present / absent directly from the timetable
+- Daily overrides — cancel, reschedule, or add extra classes for specific days
+- Re-mark attendance (changing present → absent or vice versa updates counters atomically)
+
+### 🔮 Predictor
+- Simulate future scenarios: "What if I attend the next 3 and miss 2?"
+- Instant attendance percentage recalculation on every input
+- See exactly how many consecutive classes you need to attend to recover a low attendance
+
+### 📊 Analytics
+- Attendance trend charts over time (via `fl_chart`)
+- Per-subject comparison bar charts
+- Activity heatmap showing your attendance patterns
+- Streak tracking
+
+### 🔔 Smart Notifications
+- Class reminders before each session based on your actual timetable
+- Low attendance alerts when a subject drops below your target
+- Reschedules automatically when attendance is marked or sessions change
+
+### 💎 Premium
+- ₹20/month or ₹200/year
+- Integrated Razorpay payment flow
+
+### 👤 Profile
+- Light/dark theme toggle (persisted)
+- Attendance goal slider (75%, 80%, 85% — updates calculations app-wide instantly)
+- Account management
+
+---
+
+## Business Logic
+
+All attendance calculations are mathematically precise and recalculate in real time:
+
+| Formula | Description |
+|---|---|
+| `(attended / total) × 100` | Current attendance percentage |
+| `floor((attended - target × total) / target)` | Safe bunks remaining |
+| `ceil((target × total - attended) / (1 - target))` | Classes needed to reach target |
+| `(attended / (total + 1)) × 100 >= target` | Can I bunk next class? |
+
+Attendance marking uses **atomic batch writes** — when you mark a class, both the log entry and the subject counters update in a single Firestore transaction. No inconsistency, no race conditions.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Flutter (Material 3) |
+| Language | Dart |
+| State Management | Riverpod 2 (code-gen with `@riverpod` annotations) |
+| Navigation | GoRouter |
+| Backend | Firebase (Auth, Firestore, FCM) |
+| Charts | fl_chart |
+| Local Cache | SharedPreferences |
+| Fonts | Google Fonts (Inter) |
+| Payments | Razorpay |
+
+---
+
+## Architecture
+
+AttendanceAI uses a clean, feature-based architecture with strict layer separation:
 
 ```
 lib/
 ├── core/           # Colors, typography, spacing, theme, router, utils
 ├── data/           # Models, repositories, datasources (Firestore + cache)
-├── domain/         # Business logic
-├── features/       # Feature-based modules (auth, dashboard, subjects, etc.)
+├── domain/         # Business logic, pure calculations
+├── features/       # Feature modules
+│   ├── auth/
+│   ├── dashboard/
+│   ├── subjects/
+│   ├── timetable/
+│   ├── analytics/
+│   ├── predictor/
+│   ├── notifications/
+│   └── premium/
 └── shared/         # Reusable widgets
 ```
 
-## 🛠️ Tech Stack
+### State Management
 
-| Layer | Technology |
+Every shared piece of state is managed by **Riverpod with code generation** — no Bloc, GetX, or plain ChangeNotifier anywhere in the data layer. Providers use `@riverpod` annotations and companion `.g.dart` files.
+
+Pattern breakdown:
+- `StreamProvider` — Subjects, Sessions, Attendance Logs, Daily Overrides (all real-time Firestore streams)
+- `AsyncNotifier` — Dashboard, Schedule, SubjectsNotifier, LogEditNotifier (stateful, async-aware)
+- `setState()` — Used only for local UI state (loading spinners, form toggles) — never as a substitute for global state
+
+### Attendance Marking Flow
+
+```
+UI (timetable_screen)
+  └─ markAttendance(session, status)
+       └─ timetableRepository.markSessionAttendance()
+            ├─ getLogForSession() → check if first mark or re-mark
+            │
+            ├─ First mark → WriteBatch:
+            │    • SET attendance_logs/{logId}
+            │    • UPDATE subjects/{subjectId} (attended++, total++)
+            │
+            └─ Re-mark → WriteBatch:
+                 • SET attendance_logs/{logId}
+                 • UPDATE subjects/{subjectId} (delta correction)
+
+Automatic state updates (via Riverpod stream invalidation):
+  • subjectsStreamProvider → dashboard recalculates
+  • todaySessionsStreamProvider → timetable updates
+  • attendanceLogsStreamProvider → history + analytics update
+  • notificationSchedulerWatcherProvider → notifications reschedule
+```
+
+### Firestore Schema
+
+```
+users/{uid}/
+  ├── profile fields (name, email, goal, theme, isPremium)
+  │
+  ├── subjects/{subjectId}         ← Source of truth for subject data
+  │   └── name, attendedClasses, totalClasses, targetAttendance
+  │
+  ├── timetable_entries/{id}       ← Weekly schedule blueprint
+  │   └── subject, day, startTime, endTime, faculty, room
+  │
+  ├── class_sessions/{sessionId}   ← Generated daily instances
+  │   └── subjectId, date, startTime, endTime, status
+  │
+  ├── attendance_logs/{logId}      ← Audit trail for every mark
+  │   └── subjectId, status, date, sessionId
+  │
+  ├── daily_overrides/{dateKey}/   ← Per-day schedule changes
+  │   sessions/{id}
+  │   └── type (cancel/reschedule/addExtra), newSubjectId, newTimes
+  │
+  ├── semesters/{id}               ← Semester date ranges + holidays
+  │
+  └── notification_preferences/    ← Per-subject alert config
+```
+
+### Real-Time Updates
+
+Every screen in the app is driven by Firestore streams — no manual refresh needed (except pull-to-refresh on dashboard):
+
+| Screen | Live Streams |
 |---|---|
-| UI | Flutter + Material 3 |
-| State | Riverpod 2 |
-| Navigation | GoRouter |
-| Backend | Firebase (Auth, Firestore, FCM) |
-| Charts | fl_chart |
-| Fonts | Google Fonts (Inter) |
-| Local Cache | SharedPreferences |
+| Dashboard | `subjectsStreamProvider` |
+| Schedule | `todaySessionsStreamProvider` + `todayOverridesStreamProvider` + clock tick |
+| Analytics | `analyticsLogsStreamProvider` + `subjectsStreamProvider` |
+| History | `attendanceLogsStreamProvider` |
+| Subject Detail | `subjectsStreamProvider` + `subjectLogsStreamProvider` + `upcomingSessionsProvider` |
 
-## 🚀 Getting Started
+---
+
+## Getting Started
 
 ### Prerequisites
-- Flutter SDK (≥ 3.3.0)
-- Dart SDK (≥ 3.3.0)
-- Firebase project
+- Flutter SDK ≥ 3.3.0
+- Dart SDK ≥ 3.3.0
+- A Firebase project
 
 ### Setup
 
-1. **Clone the repo**
-   ```bash
-   cd "c:\Users\Abhishek\OneDrive\Desktop\Projects\Attu"
-   ```
+**1. Clone the repo**
+```bash
+git clone https://github.com/Abhishekog19/AttendanceClap.git
+cd AttendanceClap
+```
 
-2. **Configure Firebase**
-   - Go to [Firebase Console](https://console.firebase.google.com/)
-   - Create project `attendance-ai-app`
-   - Enable **Authentication** (Email/Password + Google)
-   - Enable **Cloud Firestore**
-   - Enable **Firebase Messaging**
-   - Download `google-services.json` → `android/app/`
-   - Download `GoogleService-Info.plist` → `ios/Runner/`
-   - Update `lib/firebase_options.dart` with your actual keys
+**2. Configure Firebase**
+- Go to [Firebase Console](https://console.firebase.google.com/) and create a project
+- Enable **Authentication** (Email/Password + Google)
+- Enable **Cloud Firestore**
+- Enable **Firebase Cloud Messaging**
+- Download `google-services.json` → place in `android/app/`
+- Update `lib/firebase_options.dart` with your project keys
 
-3. **Install dependencies**
-   ```bash
-   flutter pub get
-   ```
-
-4. **Generate Riverpod code**
-   ```bash
-   dart run build_runner build --delete-conflicting-outputs
-   ```
-
-5. **Run the app**
-   ```bash
-   flutter run
-   ```
-
-## 🎨 Design System
-
-Based on the Stitch AttendanceAI design (Project ID: `12650928810199388745`).
-
-**Colors:**
-- Primary: `#004AC6` (Precision Blue)
-- Surface: `#FAF8FF` (Warm White)
-- Error: `#BA1A1A`
-
-**Font:** Inter (Regular 400, Medium 500, SemiBold 600, Bold 700)
-
-## 📐 Business Logic
-
-| Formula | Code |
-|---|---|
-| Attendance % | `(attended / total) * 100` |
-| Safe Bunks | `floor((attended / targetPercent) - total)` |
-| Classes Needed | `ceil((target*total - attended) / (1 - target))` |
-| Can I Bunk? | `(attended / (total + 1)) * 100 >= target` |
-
-## 🔐 Firebase Security Rules (Firestore)
-
-```javascript
+**3. Set up Firestore security rules**
+```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -107,25 +223,44 @@ service cloud.firestore {
 }
 ```
 
-## 📁 Firestore Structure
-
-```
-users/{userId}/
-  ├── profile: { name, email, photoUrl, attendanceGoal, themeMode }
-  ├── subjects/{id}: { name, attendedClasses, totalClasses, faculty }
-  ├── timetable/{id}: { subjectId, day, startTime, endTime, faculty, room }
-  └── attendance_logs/{id}: { subjectId, status, date }
+**4. Install dependencies**
+```bash
+flutter pub get
 ```
 
-## 🗒️ TODO
+**5. Generate Riverpod code**
+```bash
+dart run build_runner build --delete-conflicting-outputs
+```
 
-- [ ] Add Firebase `google-services.json` and `GoogleService-Info.plist`
-- [ ] Run `dart run build_runner build` to generate `.g.dart` files
-- [ ] Configure Firestore Security Rules
-- [ ] Set up FCM for push notifications
-- [ ] Add app icon (replace default)
-- [ ] Configure signing for release builds
+**6. Run**
+```bash
+flutter run
+```
 
 ---
 
-Built with ❤️ using Flutter + Firebase + Riverpod
+## Design System
+
+AttendanceAI uses a clean Material 3 design language with a focus on readability and clarity:
+
+| Token | Value |
+|---|---|
+| Primary | `#004AC6` (Precision Blue) |
+| Surface | `#FAF8FF` (Warm White) |
+| Error | `#BA1A1A` |
+| Font | Inter (Regular 400 · Medium 500 · SemiBold 600 · Bold 700) |
+
+Dark mode is fully supported and persisted to both Firestore and local cache.
+
+---
+
+## Screenshots
+
+*Coming soon.*
+
+---
+
+## Author
+
+**Abhishek** — [@Abhishekog19](https://github.com/Abhishekog19)
