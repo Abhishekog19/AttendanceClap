@@ -5,6 +5,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../models/leave_plan_result.dart';
+import '../models/subject_prediction.dart';
 import '../providers/predictor_provider.dart';
 import '../services/predictor_service.dart';
 

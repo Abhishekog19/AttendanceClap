@@ -15,6 +15,25 @@ class UserModel extends Equatable {
   final String? planType; // 'monthly' | 'annual' | null
   final DateTime? premiumExpiresAt;
 
+  // ─── Onboarding ─────────────────────────────────────────────────────────────
+  /// True once the user taps "Confirm" on the Review screen.
+  /// The router gates the main app behind this flag.
+  final bool onboardingComplete;
+
+  /// Key of the last completed onboarding step, used for resume-after-interruption.
+  /// Values: 'welcome' | 'college' | 'semester' | 'subjects' | 'timetable'
+  ///         | 'holidays' | 'import' | 'review' | 'complete'
+  final String? onboardingStep;
+
+  /// College / institution name entered during College Details step.
+  final String? collegeName;
+
+  /// Course / programme entered during College Details step.
+  final String? courseName;
+
+  /// Human-readable semester label, e.g. "Semester 3" or "Fall 2025".
+  final String? semesterName;
+
   const UserModel({
     required this.uid,
     required this.name,
@@ -26,6 +45,11 @@ class UserModel extends Equatable {
     this.isPremium = false,
     this.planType,
     this.premiumExpiresAt,
+    this.onboardingComplete = false,
+    this.onboardingStep,
+    this.collegeName,
+    this.courseName,
+    this.semesterName,
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json, String uid) {
@@ -46,6 +70,11 @@ class UserModel extends Equatable {
       isPremium: json['isPremium'] as bool? ?? false,
       planType: json['planType'] as String?,
       premiumExpiresAt: expiresAt,
+      onboardingComplete: json['onboardingComplete'] as bool? ?? false,
+      onboardingStep: json['onboardingStep'] as String?,
+      collegeName: json['collegeName'] as String?,
+      courseName: json['courseName'] as String?,
+      semesterName: json['semesterName'] as String?,
     );
   }
 
@@ -61,6 +90,11 @@ class UserModel extends Equatable {
       'planType': planType,
       'premiumExpiresAt':
           premiumExpiresAt != null ? Timestamp.fromDate(premiumExpiresAt!) : null,
+      'onboardingComplete': onboardingComplete,
+      if (onboardingStep != null) 'onboardingStep': onboardingStep,
+      if (collegeName != null) 'collegeName': collegeName,
+      if (courseName != null) 'courseName': courseName,
+      if (semesterName != null) 'semesterName': semesterName,
       'updatedAt': FieldValue.serverTimestamp(),
     };
   }
@@ -75,6 +109,11 @@ class UserModel extends Equatable {
     bool? isPremium,
     String? planType,
     DateTime? premiumExpiresAt,
+    bool? onboardingComplete,
+    Object? onboardingStep = _sentinel,
+    Object? collegeName = _sentinel,
+    Object? courseName = _sentinel,
+    Object? semesterName = _sentinel,
   }) {
     return UserModel(
       uid: uid,
@@ -87,12 +126,20 @@ class UserModel extends Equatable {
       isPremium: isPremium ?? this.isPremium,
       planType: planType ?? this.planType,
       premiumExpiresAt: premiumExpiresAt ?? this.premiumExpiresAt,
+      onboardingComplete: onboardingComplete ?? this.onboardingComplete,
+      onboardingStep: onboardingStep == _sentinel ? this.onboardingStep : onboardingStep as String?,
+      collegeName: collegeName == _sentinel ? this.collegeName : collegeName as String?,
+      courseName: courseName == _sentinel ? this.courseName : courseName as String?,
+      semesterName: semesterName == _sentinel ? this.semesterName : semesterName as String?,
     );
   }
+
+  static const _sentinel = Object();
 
   @override
   List<Object?> get props => [
         uid, name, email, photoUrl, attendanceGoal, themeMode,
         isPremium, planType, premiumExpiresAt,
+        onboardingComplete, onboardingStep, collegeName, courseName, semesterName,
       ];
 }

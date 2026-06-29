@@ -42,6 +42,19 @@ User? currentUser(Ref ref) {
   return ref.watch(authStateChangesProvider).valueOrNull;
 }
 
+/// Reactive stream of the authenticated user's Firestore profile (UserModel).
+/// The router watches this to gate the onboarding flow:
+///   - `onboardingComplete == false` → redirect into onboarding
+///   - `onboardingComplete == true`  → allow through to /dashboard
+@riverpod
+Stream<UserModel?> currentUserProfile(Ref ref) {
+  final user = ref.watch(authStateChangesProvider).valueOrNull;
+  if (user == null) return Stream.value(null);
+  return ref
+      .watch(firestoreDatasourceProvider)
+      .watchUserProfile(user.uid);
+}
+
 class AuthRepository {
   final FirebaseAuth _auth;
   final FirestoreDatasource _db;

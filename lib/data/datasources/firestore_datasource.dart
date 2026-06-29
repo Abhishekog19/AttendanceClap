@@ -465,6 +465,102 @@ class FirestoreDatasource {
     return {'attendedClasses': attended, 'totalClasses': total};
   }
 
+  // ─── Onboarding Writes ───────────────────────────────────────────────────────
+
+  /// Records the last completed onboarding step so the app can resume if
+  /// the user force-closes mid-onboarding. Keyed to the Firebase UID so
+  /// multi-account isolation is automatic.
+  Future<void> updateOnboardingStep(String uid, String stepKey) async {
+    await _userDoc(uid).set({
+      'onboardingStep': stepKey,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Flips the onboardingComplete flag when the user confirms the Review screen.
+  /// After this write, the router will never redirect to onboarding again for
+  /// this UID.
+  Future<void> setOnboardingComplete(String uid) async {
+    await _userDoc(uid).set({
+      'onboardingComplete': true,
+      'onboardingStep': 'complete',
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Batch-writes attendance logs for the Attendance Import step.
+  /// Method B (mark-absent-dates): each absent date for a subject becomes one
+  /// AttendanceLogModel with status=absent. Also atomically updates the subject
+  /// counters so attendedClasses / totalClasses stay consistent.
+  ///
+  /// Caller is responsible for NOT calling this with percentage-derived data.
+  Future<void> saveOnboardingAttendanceLogs(
+    String uid,
+    List<AttendanceLogModel> logs,
+  ) async {
+    if (logs.isEmpty) return;
+
+    // Group logs by subjectId to compute counter deltas per subject.
+    final Map<String, List<AttendanceLogModel>> bySubject = {};
+    for (final log in logs) {
+      bySubject.putIfAbsent(log.subjectId, () => []).add(log);
+    }
+
+    // Firestore batch limit is 500 operations. Chunk if needed.
+    const batchLimit = 400; // conservative: logs + counter updates
+    final allOps = <void Function(WriteBatch)>[];
+
+    for (final log in logs) {
+      allOps.add((batch) => batch.set(_logsRef(uid).doc(log.id), log.toJson()));
+    }
+    for (final entry in bySubject.entries) {
+      final subjectId = entry.key;
+      final subjectLogs = entry.value;
+      final absentCount = subjectLogs
+          .where((l) => l.status == AttendanceStatus.absent)
+          .length;
+      final presentCount = subjectLogs
+          .where((l) =>
+              l.status == AttendanceStatus.present ||
+              l.status == AttendanceStatus.late)
+          .length;
+      final total = absentCount + presentCount;
+      allOps.add((batch) => batch.update(_subjectsRef(uid).doc(subjectId), {
+            'attendedClasses': FieldValue.increment(presentCount),
+            'totalClasses': FieldValue.increment(total),
+            'updatedAt': FieldValue.serverTimestamp(),
+          }));
+    }
+
+    for (int i = 0; i < allOps.length; i += batchLimit) {
+      final batch = _db.batch();
+      final chunk = allOps.skip(i).take(batchLimit);
+      for (final op in chunk) {
+        op(batch);
+      }
+      await batch.commit();
+    }
+  }
+
+  /// Batch-writes manual attendance counts for the Attendance Import step.
+  /// Method A (manual count): directly sets attendedClasses and totalClasses
+  /// on each subject without creating individual log records.
+  Future<void> saveOnboardingManualCounts(
+    String uid,
+    Map<String, ({int attended, int total})> counts,
+  ) async {
+    if (counts.isEmpty) return;
+    final batch = _db.batch();
+    counts.forEach((subjectId, count) {
+      batch.update(_subjectsRef(uid).doc(subjectId), {
+        'attendedClasses': count.attended,
+        'totalClasses': count.total,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  }
+
   /// Public alias for use by TimetableRepository's batch mark-absent logic.
   /// Avoids duplicating the counter delta computation outside this class.
   static Map<String, int> counterDeltaPublic({
@@ -473,3 +569,4 @@ class FirestoreDatasource {
   }) =>
       _counterDelta(oldStatus: oldStatus, newStatus: newStatus);
 }
+
