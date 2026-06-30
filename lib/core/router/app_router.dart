@@ -19,7 +19,6 @@ import '../../features/timetable/screens/manage_timetable_screen.dart';
 import '../../features/timetable/screens/manual_entry_screen.dart';
 import '../../features/timetable/screens/timetable_builder_screen.dart';
 import '../../features/predictor/screens/predictor_screen.dart';
-import '../../features/analytics/screens/analytics_screen.dart';
 import '../../features/premium/screens/premium_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
 import '../../features/subjects/screens/subject_detail_screen.dart';
@@ -31,23 +30,131 @@ import '../../shared/widgets/main_shell.dart';
 import '../../data/models/subject_model.dart';
 import '../../data/models/timetable_entry_model.dart';
 
+// ─── Onboarding screens ────────────────────────────────────────────────────────
+import '../../features/onboarding/screens/ob_welcome_screen.dart';
+import '../../features/onboarding/screens/ob_college_details_screen.dart';
+import '../../features/onboarding/screens/ob_semester_setup_screen.dart';
+import '../../features/onboarding/screens/ob_subject_setup_screen.dart';
+import '../../features/onboarding/screens/ob_timetable_builder_screen.dart';
+import '../../features/onboarding/screens/ob_holiday_calendar_screen.dart';
+import '../../features/onboarding/screens/ob_attendance_import_screen.dart';
+import '../../features/onboarding/screens/ob_review_screen.dart';
+import '../../features/onboarding/screens/ob_success_screen.dart';
+import '../../features/onboarding/providers/onboarding_state.dart';
+
 part 'app_router.g.dart';
 
 @riverpod
 GoRouter appRouter(Ref ref) {
   final authState = ref.watch(authStateChangesProvider);
 
+  // Watch the current user profile to gate onboarding.
+  // UserModel.onboardingComplete == false → redirect to onboarding.
+  // Using valueOrNull so that while the profile is loading we return null
+  // (no redirect) and the router stays put without flashing.
+  final currentUser = ref.watch(currentUserProfileProvider).valueOrNull;
+
   return GoRouter(
     initialLocation: '/dashboard',
     redirect: (context, state) {
-      final isLoggedIn = authState.valueOrNull != null;
-      final isAuthRoute = state.matchedLocation.startsWith('/auth');
+      // While Firebase auth is still resolving, don't redirect at all.
+      // authState.isLoading is true during the initial stream evaluation.
+      if (authState.isLoading) return null;
 
+      final isLoggedIn = authState.valueOrNull != null;
+      final loc = state.matchedLocation;
+      final isAuthRoute = loc.startsWith('/auth');
+      final isOnboardingRoute = loc.startsWith('/onboarding');
+
+      // Not logged in → send to login (unless already on auth route)
       if (!isLoggedIn && !isAuthRoute) return '/auth/login';
-      if (isLoggedIn && isAuthRoute) return '/dashboard';
+
+      // Logged in + on an auth page → check onboarding status
+      if (isLoggedIn && isAuthRoute) {
+        // Profile still loading — stay on auth screen until it resolves
+        if (currentUser == null) return null;
+        if (!currentUser.onboardingComplete) {
+          // Resume at next step after the last completed one, or start at welcome
+          final saved = currentUser.onboardingStep;
+          final step = saved != null
+              ? (OnboardingStep.nextStep(saved) ?? OnboardingStep.welcome)
+              : OnboardingStep.welcome;
+          return OnboardingStep.routeFor(step);
+        }
+        return '/dashboard';
+      }
+
+      // Logged in + not on auth — enforce onboarding gate
+      if (isLoggedIn && !isAuthRoute && !isOnboardingRoute) {
+        // Profile still loading — allow through (dashboard handles loading state)
+        if (currentUser == null) return null;
+        // Onboarding not complete — redirect into flow
+        if (!currentUser.onboardingComplete) {
+          final saved = currentUser.onboardingStep;
+          final step = saved != null
+              ? (OnboardingStep.nextStep(saved) ?? OnboardingStep.welcome)
+              : OnboardingStep.welcome;
+          return OnboardingStep.routeFor(step);
+        }
+      }
+
+      // Logged in + on onboarding + already complete → go to dashboard
+      if (isLoggedIn && isOnboardingRoute && currentUser?.onboardingComplete == true) {
+        // Exception: success screen is fine to visit (briefly) after complete
+        if (loc == '/onboarding/success') return null;
+        return '/dashboard';
+      }
+
       return null;
     },
     routes: [
+      // ─── Onboarding Routes ────────────────────────────────────────────────────
+      GoRoute(
+        path: '/onboarding/welcome',
+        name: 'obWelcome',
+        builder: (_, __) => const ObWelcomeScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding/college',
+        name: 'obCollege',
+        builder: (_, __) => const ObCollegeDetailsScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding/semester',
+        name: 'obSemester',
+        builder: (_, __) => const ObSemesterSetupScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding/subjects',
+        name: 'obSubjects',
+        builder: (_, __) => const ObSubjectSetupScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding/timetable',
+        name: 'obTimetable',
+        builder: (_, __) => const ObTimetableBuilderScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding/holidays',
+        name: 'obHolidays',
+        builder: (_, __) => const ObHolidayCalendarScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding/import',
+        name: 'obImport',
+        builder: (_, __) => const ObAttendanceImportScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding/review',
+        name: 'obReview',
+        builder: (_, __) => const ObReviewScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding/success',
+        name: 'obSuccess',
+        builder: (_, __) => const ObSuccessScreen(),
+      ),
+
       // ─── Auth Routes ─────────────────────────────────────────────────────────
       GoRoute(
         path: '/auth/login',

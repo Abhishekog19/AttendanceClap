@@ -10,6 +10,11 @@ class SubjectModel extends Equatable {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// Per-subject attendance target percentage (0–100).
+  /// If null, the global [UserModel.attendanceGoal] is used instead.
+  /// Set during onboarding Subject Setup and editable afterwards.
+  final double? attendanceTarget;
+
   const SubjectModel({
     required this.id,
     required this.name,
@@ -18,6 +23,7 @@ class SubjectModel extends Equatable {
     this.faculty,
     required this.createdAt,
     required this.updatedAt,
+    this.attendanceTarget,
   });
 
   double get attendancePercentage =>
@@ -32,6 +38,7 @@ class SubjectModel extends Equatable {
       faculty: json['faculty'] as String?,
       createdAt: (json['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (json['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      attendanceTarget: (json['attendanceTarget'] as num?)?.toDouble(),
     );
   }
 
@@ -43,6 +50,7 @@ class SubjectModel extends Equatable {
       'faculty': faculty,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(updatedAt),
+      if (attendanceTarget != null) 'attendanceTarget': attendanceTarget,
     };
   }
 
@@ -54,6 +62,7 @@ class SubjectModel extends Equatable {
     String? faculty,
     DateTime? createdAt,
     DateTime? updatedAt,
+    Object? attendanceTarget = _sentinel,
   }) {
     return SubjectModel(
       id: id ?? this.id,
@@ -63,8 +72,13 @@ class SubjectModel extends Equatable {
       faculty: faculty ?? this.faculty,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      attendanceTarget: attendanceTarget == _sentinel
+          ? this.attendanceTarget
+          : attendanceTarget as double?,
     );
   }
+
+  static const _sentinel = Object();
 
   @override
   List<Object?> get props => [
@@ -75,5 +89,6 @@ class SubjectModel extends Equatable {
         faculty,
         createdAt,
         updatedAt,
+        attendanceTarget,
       ];
 }

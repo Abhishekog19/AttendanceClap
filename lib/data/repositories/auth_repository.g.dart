@@ -56,5 +56,29 @@ final currentUserProvider = AutoDisposeProvider<User?>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef CurrentUserRef = AutoDisposeProviderRef<User?>;
+String _$currentUserProfileHash() =>
+    r'c0847bff444f03ff9e31c7ada227f169c1ccddb3';
+
+/// Reactive stream of the authenticated user's Firestore profile (UserModel).
+/// The router watches this to gate the onboarding flow:
+///   - `onboardingComplete == false` → redirect into onboarding
+///   - `onboardingComplete == true`  → allow through to /dashboard
+///
+/// Copied from [currentUserProfile].
+@ProviderFor(currentUserProfile)
+final currentUserProfileProvider =
+    AutoDisposeStreamProvider<UserModel?>.internal(
+  currentUserProfile,
+  name: r'currentUserProfileProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$currentUserProfileHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef CurrentUserProfileRef = AutoDisposeStreamProviderRef<UserModel?>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package
