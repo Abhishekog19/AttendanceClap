@@ -124,7 +124,9 @@ class _ObSemesterSetupScreenState
               ),
             ],
           ),
-          if (state.semesterStart != null && state.semesterEnd != null) ...[
+          if (state.semesterStart != null &&
+              state.semesterEnd != null &&
+              !state.semesterEnd!.isBefore(state.semesterStart!)) ...[
             const SizedBox(height: 12),
             Container(
               padding:
@@ -285,47 +287,55 @@ class _DateTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasValue = value != 'Select';
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: OnboardingColors.surface,
+    return Semantics(
+      button: true,
+      label: '$label: $value',
+      child: Material(
+        color: OnboardingColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: OnboardingColors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label,
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: OnboardingColors.textHint,
-                  letterSpacing: 0.5,
-                )),
-            const SizedBox(height: 4),
-            Row(
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: OnboardingColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.calendar_today_rounded,
-                    size: 14,
-                    color: hasValue
-                        ? OnboardingColors.textPrimary
-                        : OnboardingColors.textHint),
-                const SizedBox(width: 6),
-                Text(
-                  value,
-                  style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: hasValue
-                        ? OnboardingColors.textPrimary
-                        : OnboardingColors.textHint,
-                  ),
+                Text(label,
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: OnboardingColors.textHint,
+                      letterSpacing: 0.5,
+                    )),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(Icons.calendar_today_rounded,
+                        size: 14,
+                        color: hasValue
+                            ? OnboardingColors.textPrimary
+                            : OnboardingColors.textHint),
+                    const SizedBox(width: 6),
+                    Text(
+                      value,
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: hasValue
+                            ? OnboardingColors.textPrimary
+                            : OnboardingColors.textHint,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );

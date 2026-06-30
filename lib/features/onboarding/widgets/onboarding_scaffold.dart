@@ -156,7 +156,9 @@ class OnboardingCTAButton extends StatelessWidget {
       width: double.infinity,
       height: 52,
       child: ElevatedButton(
-        onPressed: (enabled && !isLoading) ? onPressed : null,
+        // Use a no-op when loading so the button keeps primary styling (not
+        // the disabled style). Taps are silently swallowed while isLoading.
+        onPressed: !enabled ? null : (isLoading ? () {} : onPressed),
         style: ElevatedButton.styleFrom(
           backgroundColor: OnboardingColors.primary,
           foregroundColor: Colors.white,

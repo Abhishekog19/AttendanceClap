@@ -253,14 +253,21 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   Future<void> toggleHoliday(DateTime date) async {
     bool isSameDay(DateTime a, DateTime b) =>
         a.year == b.year && a.month == b.month && a.day == b.day;
-    final existing = state.holidays;
-    final isHoliday = existing.any((h) => isSameDay(h, date));
+    final previous = state.holidays;
+    final isHoliday = previous.any((h) => isSameDay(h, date));
     final updated = isHoliday
-        ? existing.where((h) => !isSameDay(h, date)).toList()
-        : [...existing, date];
+        ? previous.where((h) => !isSameDay(h, date)).toList()
+        : [...previous, date];
+    // Optimistic update
     state = state.copyWith(holidays: updated);
     if (state.semesterId != null) {
-      await _repo.updateHolidays(state.semesterId!, updated);
+      try {
+        await _repo.updateHolidays(state.semesterId!, updated);
+      } catch (_) {
+        // Roll back to the last persisted value on failure
+        state = state.copyWith(holidays: previous);
+        rethrow;
+      }
     }
   }
 
@@ -277,10 +284,13 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   // ─── Attendance Import ────────────────────────────────────────────────────
 
   void initImportData() {
-    if (state.importData.isNotEmpty) return;
+    // Always rebuild from the current subjects list so state changes
+    // (or a restored session) are reflected when re-entering this screen.
     final data = <String, SubjectImportData>{};
     for (final s in state.subjects) {
-      data[s.id] = SubjectImportData(subjectId: s.id, subjectName: s.name);
+      // Preserve any data the user already entered for this subject.
+      final existing = state.importData[s.id];
+      data[s.id] = existing ?? SubjectImportData(subjectId: s.id, subjectName: s.name);
     }
     state = state.copyWith(importData: data);
   }
@@ -402,6 +412,8 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     double attendanceGoal = 75.0,
   }) async {
     final subjects = await _repo.getSubjects();
+    // Reload the active semester ID so holiday updates can persist after resume.
+    final semesterId = await _repo.getActiveSemesterId();
     state = state.copyWith(
       currentStep: lastStep,
       collegeName: collegeName ?? '',
@@ -409,6 +421,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
       semesterName: semesterName ?? '',
       attendanceGoal: attendanceGoal,
       subjects: subjects,
+      semesterId: semesterId,
     );
   }
 }

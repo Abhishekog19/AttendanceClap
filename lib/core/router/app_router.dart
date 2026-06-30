@@ -57,6 +57,10 @@ GoRouter appRouter(Ref ref) {
   return GoRouter(
     initialLocation: '/dashboard',
     redirect: (context, state) {
+      // While Firebase auth is still resolving, don't redirect at all.
+      // authState.isLoading is true during the initial stream evaluation.
+      if (authState.isLoading) return null;
+
       final isLoggedIn = authState.valueOrNull != null;
       final loc = state.matchedLocation;
       final isAuthRoute = loc.startsWith('/auth');
@@ -70,8 +74,11 @@ GoRouter appRouter(Ref ref) {
         // Profile still loading — stay on auth screen until it resolves
         if (currentUser == null) return null;
         if (!currentUser.onboardingComplete) {
-          // Resume at last step or start at welcome
-          final step = currentUser.onboardingStep ?? OnboardingStep.welcome;
+          // Resume at next step after the last completed one, or start at welcome
+          final saved = currentUser.onboardingStep;
+          final step = saved != null
+              ? (OnboardingStep.nextStep(saved) ?? OnboardingStep.welcome)
+              : OnboardingStep.welcome;
           return OnboardingStep.routeFor(step);
         }
         return '/dashboard';
@@ -83,7 +90,10 @@ GoRouter appRouter(Ref ref) {
         if (currentUser == null) return null;
         // Onboarding not complete — redirect into flow
         if (!currentUser.onboardingComplete) {
-          final step = currentUser.onboardingStep ?? OnboardingStep.welcome;
+          final saved = currentUser.onboardingStep;
+          final step = saved != null
+              ? (OnboardingStep.nextStep(saved) ?? OnboardingStep.welcome)
+              : OnboardingStep.welcome;
           return OnboardingStep.routeFor(step);
         }
       }

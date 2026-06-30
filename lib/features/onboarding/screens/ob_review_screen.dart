@@ -247,12 +247,17 @@ class _ReviewRow extends StatelessWidget {
                 fontSize: 13,
                 color: OnboardingColors.textSecondary,
               )),
-          Text(value,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: OnboardingColors.textPrimary,
-              )),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.end,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: OnboardingColors.textPrimary,
+                )),
+          ),
         ],
       ),
     );

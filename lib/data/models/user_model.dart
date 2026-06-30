@@ -139,6 +139,7 @@ class UserModel extends Equatable {
   @override
   List<Object?> get props => [
         uid, name, email, photoUrl, attendanceGoal, themeMode,
+        notificationsEnabled,
         isPremium, planType, premiumExpiresAt,
         onboardingComplete, onboardingStep, collegeName, courseName, semesterName,
       ];

@@ -500,9 +500,17 @@ class FirestoreDatasource {
   ) async {
     if (logs.isEmpty) return;
 
+    // Deduplicate by log ID so FieldValue.increment is applied only once
+    // per unique log, even if the caller passes duplicates.
+    final Map<String, AttendanceLogModel> unique = {};
+    for (final log in logs) {
+      unique[log.id] = log;
+    }
+    final dedupedLogs = unique.values.toList();
+
     // Group logs by subjectId to compute counter deltas per subject.
     final Map<String, List<AttendanceLogModel>> bySubject = {};
-    for (final log in logs) {
+    for (final log in dedupedLogs) {
       bySubject.putIfAbsent(log.subjectId, () => []).add(log);
     }
 
@@ -510,7 +518,7 @@ class FirestoreDatasource {
     const batchLimit = 400; // conservative: logs + counter updates
     final allOps = <void Function(WriteBatch)>[];
 
-    for (final log in logs) {
+    for (final log in dedupedLogs) {
       allOps.add((batch) => batch.set(_logsRef(uid).doc(log.id), log.toJson()));
     }
     for (final entry in bySubject.entries) {

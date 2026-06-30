@@ -16,7 +16,7 @@ class ObWelcomeScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: OnboardingColors.bg,
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -48,7 +48,7 @@ class ObWelcomeScreen extends ConsumerWidget {
               const SizedBox(height: 40),
               // ── Feature pills ────────────────────────────────────────
               const _FeaturePills(),
-              const Spacer(),
+              const SizedBox(height: 48),
               // ── Primary CTA ───────────────────────────────────────────
               OnboardingCTAButton(
                 label: 'Get Started',

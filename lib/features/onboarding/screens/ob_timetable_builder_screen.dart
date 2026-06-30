@@ -566,6 +566,20 @@ class _SlotSheetState extends State<_SlotSheet> {
                 onPressed: _selectedSubjectId == null
                     ? null
                     : () {
+                        // Guard: end time must be strictly after start time
+                        final startMins =
+                            _startTime.hour * 60 + _startTime.minute;
+                        final endMins = _endTime.hour * 60 + _endTime.minute;
+                        if (endMins <= startMins) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'End time must be after start time.'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                          return;
+                        }
                         Navigator.of(context).pop();
                         notifier.addTimetableEntry(
                           subjectId: _selectedSubjectId!,

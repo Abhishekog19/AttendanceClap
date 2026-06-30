@@ -93,13 +93,35 @@ class OnboardingRepository {
   }) async {
     final now = DateTime.now();
     final id = existingId ?? _uuid.v4();
+    DateTime createdAt = now;
+    if (existingId != null) {
+      // Preserve the original creation timestamp so sort order is stable.
+      final existing = await _db.getSubjectById(_uid, existingId);
+      if (existing != null) {
+        createdAt = existing.createdAt;
+        attendedClasses = existing.attendedClasses;
+        totalClasses = existing.totalClasses;
+      }
+      final updated = SubjectModel(
+        id: id,
+        name: name,
+        attendedClasses: attendedClasses,
+        totalClasses: totalClasses,
+        faculty: faculty,
+        createdAt: createdAt,
+        updatedAt: now,
+        attendanceTarget: attendanceTarget,
+      );
+      await _db.updateSubject(_uid, updated);
+      return id;
+    }
     final subject = SubjectModel(
       id: id,
       name: name,
       attendedClasses: attendedClasses,
       totalClasses: totalClasses,
       faculty: faculty,
-      createdAt: now,
+      createdAt: createdAt,
       updatedAt: now,
       attendanceTarget: attendanceTarget,
     );
@@ -113,6 +135,20 @@ class OnboardingRepository {
   Future<List<SubjectModel>> getSubjects() => _db.getSubjects(_uid);
 
   Stream<List<SubjectModel>> watchSubjects() => _db.watchSubjects(_uid);
+
+  /// Returns the Firestore document ID of the most recently created semester,
+  /// or null if none exists. Used by restoreFromFirestore to rehydrate semesterId.
+  Future<String?> getActiveSemesterId() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(_uid)
+        .collection('semesters')
+        .orderBy('createdAt', descending: true)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return snap.docs.first.id;
+  }
 
   // ─── Timetable Builder ────────────────────────────────────────────────────
 
@@ -172,7 +208,7 @@ class OnboardingRepository {
   ///
   /// For each subject in [absentDatesBySubject], generates one
   /// AttendanceLogModel(status=absent) per absent date per timetable slot.
-  /// No percentage distribution logic.
+  /// Log IDs are derived from subjectId+date+startTime so retries are idempotent.
   Future<void> saveAbsentDates({
     required Map<String, List<DateTime>> absentDatesBySubject,
     required List<TimetableEntry> timetableEntries,
@@ -189,8 +225,12 @@ class OnboardingRepository {
         final dayName = _weekdayName(date.weekday);
         final dayEntries = entries.where((e) => e.day == dayName).toList();
         for (final entry in dayEntries) {
+          // Use a stable ID so repeated calls don't create duplicate logs.
+          final dateStr =
+              '${date.year}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}';
+          final stableId = '${subjectId}_${dateStr}_${entry.startTime.replaceAll(':', '')}';
           logs.add(AttendanceLogModel(
-            id: _uuid.v4(),
+            id: stableId,
             subjectId: subjectId,
             subjectName: subjectName,
             status: AttendanceStatus.absent,

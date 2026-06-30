@@ -443,28 +443,39 @@ class _SubjectSheetState extends State<_SubjectSheet> {
             width: double.infinity,
             height: 48,
             child: ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 if (_nameCtrl.text.trim().isEmpty) return;
                 final double? customTarget =
                     _useCustomTarget ? _target : null;
-                Navigator.of(context).pop();
-                if (isEdit) {
-                  notifier.editSubject(
-                    subjectId: widget.existing!.id,
-                    name: _nameCtrl.text,
-                    faculty: _facultyCtrl.text.isEmpty
-                        ? null
-                        : _facultyCtrl.text,
-                    attendanceTarget: customTarget,
-                  );
-                } else {
-                  notifier.addSubject(
-                    name: _nameCtrl.text,
-                    faculty: _facultyCtrl.text.isEmpty
-                        ? null
-                        : _facultyCtrl.text,
-                    attendanceTarget: customTarget,
-                  );
+                try {
+                  if (isEdit) {
+                    await notifier.editSubject(
+                      subjectId: widget.existing!.id,
+                      name: _nameCtrl.text,
+                      faculty: _facultyCtrl.text.isEmpty
+                          ? null
+                          : _facultyCtrl.text,
+                      attendanceTarget: customTarget,
+                    );
+                  } else {
+                    await notifier.addSubject(
+                      name: _nameCtrl.text,
+                      faculty: _facultyCtrl.text.isEmpty
+                          ? null
+                          : _facultyCtrl.text,
+                      attendanceTarget: customTarget,
+                    );
+                  }
+                  if (context.mounted) Navigator.of(context).pop();
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Failed to save: $e'),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
                 }
               },
               style: ElevatedButton.styleFrom(
