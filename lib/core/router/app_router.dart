@@ -35,12 +35,15 @@ import '../../features/onboarding/screens/ob_welcome_screen.dart';
 import '../../features/onboarding/screens/ob_college_details_screen.dart';
 import '../../features/onboarding/screens/ob_semester_setup_screen.dart';
 import '../../features/onboarding/screens/ob_subject_setup_screen.dart';
-import '../../features/onboarding/screens/ob_timetable_builder_screen.dart';
 import '../../features/onboarding/screens/ob_holiday_calendar_screen.dart';
 import '../../features/onboarding/screens/ob_attendance_import_screen.dart';
 import '../../features/onboarding/screens/ob_review_screen.dart';
 import '../../features/onboarding/screens/ob_success_screen.dart';
 import '../../features/onboarding/providers/onboarding_state.dart';
+// ─── Timetable Editor (new grid-based editor) ─────────────────────────────────
+import '../../features/timetable_editor/screens/period_timing_setup_screen.dart';
+import '../../features/timetable_editor/screens/ob_timetable_grid_screen.dart';
+import '../../features/timetable_editor/screens/edit_timetable_screen.dart';
 
 part 'app_router.g.dart';
 
@@ -129,10 +132,16 @@ GoRouter appRouter(Ref ref) {
         name: 'obSubjects',
         builder: (_, __) => const ObSubjectSetupScreen(),
       ),
+      // NEW: Period timing setup (between subjects and timetable grid)
+      GoRoute(
+        path: '/onboarding/period-timing',
+        name: 'obPeriodTiming',
+        builder: (_, __) => const PeriodTimingSetupScreen(),
+      ),
       GoRoute(
         path: '/onboarding/timetable',
         name: 'obTimetable',
-        builder: (_, __) => const ObTimetableBuilderScreen(),
+        builder: (_, __) => const ObTimetableGridScreen(), // replaced with new grid
       ),
       GoRoute(
         path: '/onboarding/holidays',
@@ -283,6 +292,12 @@ GoRouter appRouter(Ref ref) {
         path: '/timetable/builder',
         name: 'timetableBuilder',
         builder: (context, state) => const TimetableBuilderScreen(),
+      ),
+      // NEW: Grid-based timetable editor (post-onboarding)
+      GoRoute(
+        path: '/timetable/edit',
+        name: 'editTimetable',
+        builder: (context, state) => const EditTimetableScreen(),
       ),
       GoRoute(
         path: '/notifications/settings',
