@@ -644,8 +644,10 @@ class _LogTile extends ConsumerWidget {
                 (s) => RadioListTile<String>(
                   title: Text(s.name),
                   value: s.id,
+                  // ignore: deprecated_member_use
                   groupValue: selectedId,
                   dense: true,
+                  // ignore: deprecated_member_use
                   onChanged: (v) => setS(() {
                     selectedId = v;
                     selectedName = s.name;

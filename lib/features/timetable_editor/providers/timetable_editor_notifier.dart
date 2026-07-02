@@ -14,6 +14,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../data/models/subject_model.dart';
+import '../../../data/repositories/timetable_repository.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../models/timetable_editor_models.dart';
 import '../repository/timetable_editor_repository.dart';
@@ -76,6 +77,7 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
 
   StreamSubscription<Map<String, dynamic>>? _configSub;
   StreamSubscription<List<LectureBlock>>? _lecturesSub;
+  Timer? _regenDebounce;
 
   @override
   TimetableEditorFullState build() {
@@ -91,6 +93,7 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
     ref.onDispose(() {
       _configSub?.cancel();
       _lecturesSub?.cancel();
+      _regenDebounce?.cancel();
     });
 
     return initialState;
@@ -122,6 +125,8 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
       (_, next) {
         if (next.hasValue) {
           _updateData(state.data.copyWith(subjects: next.value!));
+          // Re-run purge whenever subjects list changes (e.g. a subject deleted)
+          _purgeOrphanedLectures();
         }
       },
       fireImmediately: true,
@@ -130,12 +135,36 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
     // Lectures stream
     _lecturesSub = _repo.watchLectures().listen((lectures) {
       _updateData(state.data.copyWith(lectures: lectures));
+      // Purge lectures that don't match any loaded subject
+      _purgeOrphanedLectures();
     });
   }
 
   void _updateData(TimetableEditorState newData) {
     final conflicts = _detectConflicts(newData);
     state = state.copyWith(data: newData, conflicts: conflicts);
+  }
+
+  // ── Orphan purge ─────────────────────────────────────────────────────────────
+
+  /// Removes LectureBlocks whose subjectId no longer exists in the loaded
+  /// subjects list. Fires Firestore deletes fire-and-forget.
+  /// Safe to call speculatively — no-ops when subjects list is empty (still loading).
+  void _purgeOrphanedLectures() {
+    final subjects = state.data.subjects;
+    if (subjects.isEmpty) return; // subjects not loaded yet — wait
+    final subjectIds = subjects.map((s) => s.id).toSet();
+    final orphans = state.data.lectures
+        .where((l) => !subjectIds.contains(l.subjectId))
+        .toList();
+    if (orphans.isEmpty) return;
+    for (final l in orphans) {
+      _repo.deleteLecture(l.id);
+    }
+    _updateData(state.data.copyWith(
+      lectures:
+          state.data.lectures.where((l) => subjectIds.contains(l.subjectId)).toList(),
+    ));
   }
 
   // ── Subject management (delegates to SubjectRepository via onboarding path) ──
@@ -161,20 +190,15 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
     );
   }
 
-  // ── Place lecture ────────────────────────────────────────────────────────────
+  // ── Place lecture ─────────────────────────────────────────────────────────────
 
-  /// Places the currently selected subject into the given hour row for a day.
-  /// [day]: "MON".."SUN", [hour]: integer hour (0-23).
-  /// Silently no-ops if cell is occupied or no subject is selected.
-  Future<void> placeLecture(String day, int hour) async {
+  /// Places the currently selected subject at an exact [startTime] ("HH:mm")
+  /// for a given [day]. Silently no-ops if no subject is selected or the
+  /// new block would overlap an existing block.
+  Future<void> placeLectureAt(String day, String startTime) async {
     final subjectId = state.ui.selectedSubjectId;
     if (subjectId == null) return;
 
-    // Check if hour is already occupied
-    if (state.data.lectureAtHour(day, hour) != null) return;
-
-    final startTime =
-        '${hour.toString().padLeft(2, '0')}:00';
     final id = _uuid.v4();
     final lecture = LectureBlock(
       id: id,
@@ -184,22 +208,41 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
       durationMinutes: state.data.defaultLectureDurationMinutes,
     );
 
-    // Optimistic local update — selection persists for rapid placement
+    // Check overlap with existing blocks
+    final newStart = _timeToMins(startTime);
+    final newEnd   = newStart + lecture.durationMinutes;
+    final overlaps = state.data.lecturesForDay(day).any((l) {
+      final lStart = _timeToMins(l.startTime);
+      final lEnd   = lStart + l.durationMinutes;
+      return newStart < lEnd && lStart < newEnd;
+    });
+    if (overlaps) return;
+
+    // Optimistic local update
     _updateData(state.data.copyWith(
       lectures: [...state.data.lectures, lecture],
     ));
 
     // Firestore (fire-and-forget)
     _repo.addLecture(lecture);
+
+    // Debounced session regeneration
+    _scheduleRegen();
   }
 
-  // ── Delete lecture ────────────────────────────────────────────────────────────
+  /// Legacy method retained for compatibility — places at whole-hour boundary.
+  @Deprecated('Use placeLectureAt(day, startTime) instead')
+  Future<void> placeLecture(String day, int hour) =>
+      placeLectureAt(day, '${hour.toString().padLeft(2, '0')}:00');
+
+  // ── Delete lecture ─────────────────────────────────────────────────────────────
 
   Future<void> deleteLecture(String lectureId) async {
     _updateData(state.data.copyWith(
       lectures: state.data.lectures.where((l) => l.id != lectureId).toList(),
     ));
     _repo.deleteLecture(lectureId);
+    _scheduleRegen();
   }
 
   // ── Update lecture time / metadata ────────────────────────────────────────────
@@ -218,6 +261,7 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
           state.data.lectures.map((l) => l.id == lectureId ? after : l).toList(),
     ));
     _repo.updateLecture(after);
+    _scheduleRegen();
   }
 
   Future<void> updateLectureDetails(
@@ -244,9 +288,10 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
           state.data.lectures.map((l) => l.id == lectureId ? after : l).toList(),
     ));
     _repo.updateLecture(after);
+    _scheduleRegen();
   }
 
-  // ── Grid Config ───────────────────────────────────────────────────────────────
+  // ── Grid Config ─────────────────────────────────────────────────────────────
 
   Future<void> updateDefaultLectureDuration(int minutes) async {
     _updateData(state.data.copyWith(defaultLectureDurationMinutes: minutes));
@@ -259,6 +304,34 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
       gridEndHour: endHour,
     ));
     _repo.saveGridConfig(gridStartHour: startHour, gridEndHour: endHour);
+  }
+
+  // ── Session regeneration (debounced) ────────────────────────────────────────
+
+  /// Schedules a session regeneration 1.5 seconds after the last edit.
+  /// Rapid-fire placements only trigger one regeneration.
+  void _scheduleRegen() {
+    _regenDebounce?.cancel();
+    _regenDebounce = Timer(const Duration(milliseconds: 1500), _doRegen);
+  }
+
+  Future<void> _doRegen() async {
+    final lectures = state.data.lectures;
+    if (lectures.isEmpty) return;
+    try {
+      await ref.read(timetableRepositoryProvider)
+          .regenerateFutureSessionsFromLectures(lectures: lectures);
+    } catch (_) {
+      // Best-effort — don't surface errors to the user
+    }
+  }
+
+  /// Cancels any pending debounce and immediately runs regeneration.
+  /// Called by [EditTimetableScreen] when the user taps Done.
+  Future<void> flushRegeneration() async {
+    _regenDebounce?.cancel();
+    _regenDebounce = null;
+    await _doRegen();
   }
 
   // ── Conflict detection ────────────────────────────────────────────────────────

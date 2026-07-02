@@ -366,6 +366,94 @@ class TimetableRepository {
     } while (snap.docs.length == batchSize);
   }
 
+  /// Deletes only future (today or later) sessions whose status is [notMarked].
+  /// Past sessions and already-marked sessions are preserved so attendance
+  /// history is not lost when the timetable is edited post-onboarding.
+  Future<void> deleteFutureUnmarkedSessions() async {
+    final startOfToday = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+    );
+    const batchSize = 500;
+    QuerySnapshot<Map<String, dynamic>> snap;
+    do {
+      snap = await _sessionsCol
+          .where('date',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
+          .where('status', isEqualTo: 'notMarked')
+          .limit(batchSize)
+          .get();
+      if (snap.docs.isEmpty) break;
+      final batch = _firestore.batch();
+      for (final doc in snap.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    } while (snap.docs.length == batchSize);
+  }
+
+  /// Regenerates class_sessions for future dates from the current
+  /// [LectureBlock]s + active semester.
+  ///
+  /// Safe to call post-onboarding: only future unmarked sessions are wiped,
+  /// so past attendance marks are preserved.
+  ///
+  /// Returns the number of sessions written, or 0 if no semester/lectures found.
+  Future<int> regenerateFutureSessionsFromLectures({
+    required List<LectureBlock> lectures,
+  }) async {
+    final semester = await getActiveSemester();
+    if (semester == null || lectures.isEmpty) return 0;
+
+    final startOfToday = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+    );
+
+    // Wipe only future unmarked sessions
+    await deleteFutureUnmarkedSessions();
+
+    // Re-generate sessions from today → semester end
+    final sessions = <ClassSession>[];
+    for (final lecture in lectures) {
+      final weekday = kDayOrder.indexOf(lecture.day) + 1;
+      if (weekday == 0) continue;
+
+      final dates = semester.getDatesForWeekday(weekday)
+          .where((d) => !d.isBefore(startOfToday))
+          .toList();
+
+      for (final date in dates) {
+        sessions.add(ClassSession(
+          id: _uuid.v4(),
+          subjectId: lecture.subjectId,
+          subjectName: '',
+          date: date,
+          startTime: lecture.startTime,
+          endTime: lecture.endTime,
+          faculty: lecture.facultyName,
+          room: lecture.classroom,
+          status: AttendanceStatus.notMarked,
+          uid: _uid,
+        ));
+      }
+    }
+
+    const chunkSize = 500;
+    for (int i = 0; i < sessions.length; i += chunkSize) {
+      final chunk = sessions.skip(i).take(chunkSize).toList();
+      final batch = _firestore.batch();
+      for (final session in chunk) {
+        batch.set(_sessionsCol.doc(session.id), session.toMap());
+      }
+      await batch.commit();
+    }
+
+    return sessions.length;
+  }
+
   /// Generates sessions for a single entry from [fromDate] to semester end.
   Future<int> addSessionsForEntry({
     required TimetableEntry entry,

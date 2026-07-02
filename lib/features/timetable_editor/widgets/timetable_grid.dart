@@ -1,19 +1,28 @@
-/// TimetableGrid — Time-Continuous Weekly Grid
+/// TimetableGrid — True Continuous Timeline Grid
 ///
-/// Used in both onboarding and edit modes. Mode only affects surrounding chrome.
+/// Implements a Google-Calendar-style day-view grid where each day column
+/// is a fixed-height Stack. LectureBlocks are Positioned absolutely by their
+/// real start minute and duration — not row/slot-anchored.
 ///
 /// Layout:
 ///   • Sticky time-label column (left)
 ///   • Sticky day-header row (top)
-///   • Each row = 1 hour (gridStartHour to gridEndHour)
-///   • Adjacent same-subject cells rendered as merged vertical block
+///   • Each day column is a Stack with:
+///       - Background: CustomPaint drawing decorative hour separator lines
+///       - Tap layer: GestureDetector → converts tap Y → snapped 15-min start
+///       - Lecture blocks: Positioned by (startMins - rangeStart) * pxPerMin
 ///   • Subject library strip pinned below header
 ///
-/// Cell interactions:
-///   • Tap empty cell → place selected subject
-///   • Tap occupied cell → quick popup (time, remove)
-///   • Long-press occupied cell → detail sheet (time picker, duration, notes)
+/// Placement:
+///   • Tap empty area → snaps to nearest 15-min, places selected subject
+///   • Tap occupied block → quick remove popup
+///   • Long-press occupied block → detail sheet (time picker, duration, notes)
+///
+/// Same-subject contiguous detection:
+///   blockA.endTime == blockB.startTime → suppress shared border between them
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -32,10 +41,11 @@ enum TimetableGridMode { onboarding, edit }
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
-const _kHourRowHeight = 56.0;    // height of each hour row
-const _kCellWidth = 90.0;        // width of each day column
-const _kLabelWidth = 52.0;       // sticky time-label column
-const _kHeaderHeight = 48.0;     // sticky day-header row
+const _kPxPerMinute = 1.2;       // 60 min = 72 px per hour
+const _kCellWidth    = 90.0;
+const _kLabelWidth   = 52.0;
+const _kHeaderHeight = 48.0;
+const _kMinSnapMinutes = 15;
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
@@ -56,17 +66,19 @@ class TimetableGrid extends ConsumerStatefulWidget {
 }
 
 class _TimetableGridState extends ConsumerState<TimetableGrid> {
-  final _vertCtrl = ScrollController();
-  final _horizBodyCtrl = ScrollController();
+  final _vertBodyCtrl  = ScrollController();
+  final _vertLabelCtrl = ScrollController();
+  final _horizBodyCtrl   = ScrollController();
   final _horizHeaderCtrl = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    _horizBodyCtrl.addListener(_syncScroll);
+    _horizBodyCtrl.addListener(_syncHoriz);
+    _vertBodyCtrl.addListener(_syncVert);
   }
 
-  void _syncScroll() {
+  void _syncHoriz() {
     if (_horizBodyCtrl.hasClients && _horizHeaderCtrl.hasClients) {
       if (_horizHeaderCtrl.offset != _horizBodyCtrl.offset) {
         _horizHeaderCtrl.jumpTo(_horizBodyCtrl.offset);
@@ -74,10 +86,20 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
     }
   }
 
+  void _syncVert() {
+    if (_vertBodyCtrl.hasClients && _vertLabelCtrl.hasClients) {
+      if (_vertLabelCtrl.offset != _vertBodyCtrl.offset) {
+        _vertLabelCtrl.jumpTo(_vertBodyCtrl.offset);
+      }
+    }
+  }
+
   @override
   void dispose() {
-    _horizBodyCtrl.removeListener(_syncScroll);
-    _vertCtrl.dispose();
+    _horizBodyCtrl.removeListener(_syncHoriz);
+    _vertBodyCtrl.removeListener(_syncVert);
+    _vertBodyCtrl.dispose();
+    _vertLabelCtrl.dispose();
     _horizBodyCtrl.dispose();
     _horizHeaderCtrl.dispose();
     super.dispose();
@@ -85,32 +107,41 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
 
   // ── Colours ────────────────────────────────────────────────────────────────
 
-  Color _bg(bool dark) => dark ? const Color(0xFF111318) : const Color(0xFFF7F7FB);
-  Color _surface(bool dark) => dark ? const Color(0xFF1E2028) : Colors.white;
-  Color _border(bool dark) => dark ? const Color(0xFF282A34) : const Color(0xFFE1E2ED);
-  Color _labelColor(bool dark) => dark ? const Color(0xFF8B8FA8) : const Color(0xFF8990B0);
-  Color _headerText(bool dark) => dark ? Colors.white : const Color(0xFF191B23);
-  Color _primaryColor(bool dark) => dark ? const Color(0xFFB4C5FF) : const Color(0xFF4F5EFF);
+  Color _bg(bool dark)        => dark ? const Color(0xFF111318) : const Color(0xFFF7F7FB);
+  Color _surface(bool dark)   => dark ? const Color(0xFF1E2028) : Colors.white;
+  Color _border(bool dark)    => dark ? const Color(0xFF282A34) : const Color(0xFFE1E2ED);
+  Color _labelColor(bool dark)=> dark ? const Color(0xFF8B8FA8) : const Color(0xFF8990B0);
+  Color _headerText(bool dark)=> dark ? Colors.white : const Color(0xFF191B23);
+  Color _primary(bool dark)   => dark ? const Color(0xFFB4C5FF) : const Color(0xFF4F5EFF);
 
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final fullState = ref.watch(timetableEditorNotifierProvider);
+    final fullState  = ref.watch(timetableEditorNotifierProvider);
     final editorData = fullState.data;
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final hours = editorData.hourRows;
+    final dark       = Theme.of(context).brightness == Brightness.dark;
+
+    final rangeStart = editorData.gridStartHour * 60; // minutes since midnight
+    final rangeEnd   = editorData.gridEndHour   * 60;
+    final totalMins  = rangeEnd - rangeStart;
+    final columnHeight = totalMins * _kPxPerMinute;
+
+    // Build hour mark list for both labels and background lines
+    final hourMarks = <int>[
+      for (int h = editorData.gridStartHour; h <= editorData.gridEndHour; h++) h,
+    ];
 
     return ColoredBox(
       color: _bg(dark),
       child: Column(
         children: [
-          // ── Subject library strip ────────────────────────────────────────
+          // ── Subject library strip ──────────────────────────────────────────
           SubjectLibraryStrip(
             onAddSubjectTap: widget.onAddSubjectTap,
           ),
 
-          // ── Header row (day labels) ──────────────────────────────────────
+          // ── Header row (day labels) ────────────────────────────────────────
           SizedBox(
             height: _kHeaderHeight,
             child: Row(
@@ -123,12 +154,12 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
                       color: _surface(dark),
                       border: Border(
                         bottom: BorderSide(color: _border(dark)),
-                        right: BorderSide(color: _border(dark)),
+                        right:  BorderSide(color: _border(dark)),
                       ),
                     ),
                   ),
                 ),
-                // Day headers (horizontally synced with body)
+                // Scrolling day headers (synced with body)
                 Expanded(
                   child: SingleChildScrollView(
                     controller: _horizHeaderCtrl,
@@ -145,7 +176,7 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
                           textColor: _headerText(dark),
                           border: _border(dark),
                           surface: _surface(dark),
-                          accent: _primaryColor(dark),
+                          accent: _primary(dark),
                         );
                       }).toList(),
                     ),
@@ -155,7 +186,7 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
             ),
           ),
 
-          // ── Grid body (scrollable) ───────────────────────────────────────
+          // ── Grid body (scrollable) ─────────────────────────────────────────
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -164,33 +195,44 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
                 SizedBox(
                   width: _kLabelWidth,
                   child: SingleChildScrollView(
-                    controller: _vertCtrl,
+                    controller: _vertLabelCtrl,
                     physics: const NeverScrollableScrollPhysics(),
-                    child: Column(
-                      children: hours.map((h) => _TimeLabelCell(
-                        hour: h,
-                        dark: dark,
-                        labelColor: _labelColor(dark),
-                        border: _border(dark),
-                      )).toList(),
+                    child: _TimeLabelColumn(
+                      hourMarks: hourMarks,
+                      columnHeight: columnHeight,
+                      rangeStart: rangeStart,
+                      dark: dark,
+                      labelColor: _labelColor(dark),
+                      border: _border(dark),
                     ),
                   ),
                 ),
-                // Scrollable day-columns
+                // Horizontally + vertically scrollable body
                 Expanded(
                   child: SingleChildScrollView(
-                    controller: _vertCtrl,
+                    controller: _vertBodyCtrl,
                     child: SingleChildScrollView(
                       controller: _horizBodyCtrl,
                       scrollDirection: Axis.horizontal,
-                      child: _GridBody(
-                        fullState: fullState,
-                        hours: hours,
-                        dark: dark,
-                        border: _border(dark),
-                        surface: _surface(dark),
-                        onCellTap: _onCellTap,
-                        onCellLongPress: _onCellLongPress,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: kDayOrder.map((day) {
+                          return _TimelineColumn(
+                            day: day,
+                            fullState: fullState,
+                            columnHeight: columnHeight,
+                            rangeStart: rangeStart,
+                            dark: dark,
+                            border: _border(dark),
+                            surface: _surface(dark),
+                            primary: _primary(dark),
+                            onTapDown: (localY) =>
+                                _onColumnTap(day, localY, rangeStart, editorData),
+                            onBlockTap: (lecture) => _onBlockTap(lecture),
+                            onBlockLongPress: (lecture) =>
+                                _onBlockLongPress(lecture),
+                          );
+                        }).toList(),
                       ),
                     ),
                   ),
@@ -199,46 +241,48 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
             ),
           ),
 
-          // ── Footer CTA ──────────────────────────────────────────────────
-          if (widget.onFinish != null) _FooterBar(
-            mode: widget.mode,
-            dark: dark,
-            onFinish: widget.onFinish!,
-            primary: _primaryColor(dark),
-          ),
+          // ── Footer CTA (onboarding only) ───────────────────────────────────
+          if (widget.mode == TimetableGridMode.onboarding &&
+              widget.onFinish != null)
+            _FooterBar(
+              dark: dark,
+              onFinish: widget.onFinish!,
+              primary: _primary(dark),
+            ),
         ],
       ),
     );
   }
 
-  // ── Cell interactions ─────────────────────────────────────────────────────
+  // ── Interaction handlers ──────────────────────────────────────────────────
 
-  void _onCellTap(String day, int hour, LectureBlock? existing) {
+  void _onColumnTap(
+    String day,
+    double localY,
+    int rangeStart,
+    TimetableEditorState data,
+  ) {
     final notifier = ref.read(timetableEditorNotifierProvider.notifier);
+    final selectedId =
+        ref.read(timetableEditorNotifierProvider).ui.selectedSubjectId;
+    if (selectedId == null) return;
 
-    if (existing != null) {
-      // Tap on occupied cell → quick remove popup
-      HapticFeedback.selectionClick();
-      _showQuickPopup(day: day, lecture: existing);
-    } else {
-      // Tap empty cell → place subject if one is selected
-      final selectedId = ref.read(timetableEditorNotifierProvider).ui.selectedSubjectId;
-      if (selectedId != null) {
-        HapticFeedback.lightImpact();
-        notifier.placeLecture(day, hour);
-      }
-    }
+    // Convert Y → raw minute value within the range
+    final rawMin = rangeStart + (localY / _kPxPerMinute).round();
+    // Snap to nearest 15 minutes
+    final snapped = ((rawMin / _kMinSnapMinutes).round() * _kMinSnapMinutes)
+        .clamp(rangeStart, rangeStart + (data.gridEndHour - data.gridStartHour) * 60 - 15);
+    final h = snapped ~/ 60;
+    final m = snapped % 60;
+    final startTime =
+        '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+
+    HapticFeedback.lightImpact();
+    notifier.placeLectureAt(day, startTime);
   }
 
-  void _onCellLongPress(String day, int hour, LectureBlock lecture) {
-    HapticFeedback.mediumImpact();
-    _showDetailSheet(lecture: lecture);
-  }
-
-  void _showQuickPopup({
-    required String day,
-    required LectureBlock lecture,
-  }) {
+  void _onBlockTap(LectureBlock lecture) {
+    HapticFeedback.selectionClick();
     final state = ref.read(timetableEditorNotifierProvider);
     final subject = state.data.subjectById(lecture.subjectId);
     showCellBottomSheet(
@@ -250,7 +294,8 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
     );
   }
 
-  void _showDetailSheet({required LectureBlock lecture}) {
+  void _onBlockLongPress(LectureBlock lecture) {
+    HapticFeedback.mediumImpact();
     final state = ref.read(timetableEditorNotifierProvider);
     final subject = state.data.subjectById(lecture.subjectId);
     showCellBottomSheet(
@@ -263,280 +308,347 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
   }
 }
 
-// ─── Grid Body ────────────────────────────────────────────────────────────────
+// ─── Time Label Column ────────────────────────────────────────────────────────
 
-class _GridBody extends StatelessWidget {
-  const _GridBody({
-    required this.fullState,
-    required this.hours,
+class _TimeLabelColumn extends StatelessWidget {
+  const _TimeLabelColumn({
+    required this.hourMarks,
+    required this.columnHeight,
+    required this.rangeStart,
     required this.dark,
+    required this.labelColor,
     required this.border,
-    required this.surface,
-    required this.onCellTap,
-    required this.onCellLongPress,
   });
 
-  final TimetableEditorFullState fullState;
-  final List<int> hours;
+  final List<int> hourMarks;
+  final double columnHeight;
+  final int rangeStart;
   final bool dark;
+  final Color labelColor;
   final Color border;
-  final Color surface;
-  final void Function(String day, int hour, LectureBlock? existing) onCellTap;
-  final void Function(String day, int hour, LectureBlock lecture) onCellLongPress;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: kDayOrder.map((day) {
-        return _DayColumn(
-          day: day,
-          fullState: fullState,
-          hours: hours,
-          dark: dark,
-          border: border,
-          surface: surface,
-          onCellTap: onCellTap,
-          onCellLongPress: onCellLongPress,
-        );
-      }).toList(),
+    return SizedBox(
+      width: _kLabelWidth,
+      height: columnHeight,
+      child: Stack(
+        children: [
+          // Right border line
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            child: Container(width: 1, color: border),
+          ),
+          // Hour labels positioned at their exact Y coordinate
+          ...hourMarks.map((h) {
+            final y = (h * 60 - rangeStart) * _kPxPerMinute;
+            return Positioned(
+              top: y - 8,
+              left: 0,
+              right: 6,
+              child: Text(
+                _formatHour(h),
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: labelColor,
+                ),
+                textAlign: TextAlign.right,
+              ),
+            );
+          }),
+        ],
+      ),
     );
+  }
+
+  static String _formatHour(int h) {
+    if (h == 0) return '12 AM';
+    if (h < 12) return '$h AM';
+    if (h == 12) return '12 PM';
+    return '${h - 12} PM';
   }
 }
 
-// ─── Day Column ───────────────────────────────────────────────────────────────
+// ─── Timeline Column ──────────────────────────────────────────────────────────
 
-class _DayColumn extends StatelessWidget {
-  const _DayColumn({
+class _TimelineColumn extends StatelessWidget {
+  const _TimelineColumn({
     required this.day,
     required this.fullState,
-    required this.hours,
+    required this.columnHeight,
+    required this.rangeStart,
     required this.dark,
     required this.border,
     required this.surface,
-    required this.onCellTap,
-    required this.onCellLongPress,
+    required this.primary,
+    required this.onTapDown,
+    required this.onBlockTap,
+    required this.onBlockLongPress,
   });
 
   final String day;
   final TimetableEditorFullState fullState;
-  final List<int> hours;
+  final double columnHeight;
+  final int rangeStart;
   final bool dark;
   final Color border;
   final Color surface;
-  final void Function(String day, int hour, LectureBlock? existing) onCellTap;
-  final void Function(String day, int hour, LectureBlock lecture) onCellLongPress;
+  final Color primary;
+  final void Function(double localY) onTapDown;
+  final void Function(LectureBlock) onBlockTap;
+  final void Function(LectureBlock) onBlockLongPress;
 
   @override
   Widget build(BuildContext context) {
     final data = fullState.data;
-    final selectedSubjectId = fullState.ui.selectedSubjectId;
-
-    return SizedBox(
-      width: _kCellWidth,
-      child: Column(
-        children: hours.map((hour) {
-          final lecture = data.lectureAtHour(day, hour);
-          final isStartHour = lecture != null && lecture.startHour == hour;
-          final isInMultiHour = lecture != null && !isStartHour;
-          final hasConflict = lecture != null &&
-              fullState.conflicts.containsKey(lecture.id);
-          final subject = lecture != null ? data.subjectById(lecture.subjectId) : null;
-          final isPlacementMode = selectedSubjectId != null;
-
-          if (isInMultiHour) {
-            // Interior of a multi-hour block — render blank continuation
-            return _ContinuationCell(
-              height: _kHourRowHeight,
-              color: subject != null
-                  ? hexToColor(subject.effectiveColorHex).withValues(alpha: 0.85)
-                  : Colors.grey.shade300,
-              border: border,
-              dark: dark,
-            );
-          }
-
-          return _HourCell(
-            height: _kHourRowHeight,
-            lecture: lecture,
-            subject: subject,
-            hasConflict: hasConflict,
-            isPlacementMode: isPlacementMode,
-            dark: dark,
-            border: border,
-            surface: surface,
-            onTap: () => onCellTap(day, hour, lecture),
-            onLongPress: lecture != null
-                ? () => onCellLongPress(day, hour, lecture)
-                : null,
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
-
-// ─── Hour Cell ────────────────────────────────────────────────────────────────
-
-class _HourCell extends StatelessWidget {
-  const _HourCell({
-    required this.height,
-    required this.lecture,
-    required this.subject,
-    required this.hasConflict,
-    required this.isPlacementMode,
-    required this.dark,
-    required this.border,
-    required this.surface,
-    required this.onTap,
-    this.onLongPress,
-  });
-
-  final double height;
-  final LectureBlock? lecture;
-  final SubjectModel? subject;
-  final bool hasConflict;
-  final bool isPlacementMode;
-  final bool dark;
-  final Color border;
-  final Color surface;
-  final VoidCallback onTap;
-  final VoidCallback? onLongPress;
-
-  @override
-  Widget build(BuildContext context) {
-    final isEmpty = lecture == null;
-
-    // Empty cell appearance
-    if (isEmpty) {
-      return GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          height: height,
-          width: _kCellWidth,
-          decoration: BoxDecoration(
-            color: isPlacementMode
-                ? (dark
-                    ? const Color(0xFF282A34)
-                    : const Color(0xFFF0F2FF))
-                : surface,
-            border: Border.all(
-              color: border,
-              width: 0.5,
-            ),
-          ),
-          child: isPlacementMode
-              ? Center(
-                  child: Icon(
-                    Icons.add_rounded,
-                    size: 18,
-                    color: dark
-                        ? const Color(0xFF6B7280)
-                        : const Color(0xFFCCCFE8),
-                  ),
-                )
-              : null,
-        ),
-      );
-    }
-
-    // Occupied cell
-    final color = subject != null
-        ? hexToColor(subject!.effectiveColorHex)
-        : Colors.grey.shade400;
-    final textColor = _contrastColor(color);
+    final lectures = data.lecturesForDay(day)
+      ..sort((a, b) => _startMins(a).compareTo(_startMins(b)));
+    final isPlacementMode = fullState.ui.selectedSubjectId != null;
 
     return GestureDetector(
-      onTap: onTap,
-      onLongPress: onLongPress,
+      onTapDown: isPlacementMode
+          ? (details) => onTapDown(details.localPosition.dy)
+          : null,
       behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: height,
+      child: SizedBox(
         width: _kCellWidth,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.85),
-          border: hasConflict
-              ? Border.all(
-                  color: Colors.red.shade400,
-                  width: 2,
-                )
-              : Border.all(
-                  color: color.withValues(alpha: 0.4),
-                  width: 0.5,
-                ),
-        ),
+        height: columnHeight,
         child: Stack(
+          clipBehavior: Clip.hardEdge,
           children: [
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  subject?.effectiveShortName ?? '?',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: textColor,
-                  ),
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+            // ── Background: column fill + right border ─────────────────────
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: _kCellWidth,
+              height: columnHeight,
+              color: isPlacementMode
+                  ? (dark
+                      ? const Color(0xFF1A1C25)
+                      : const Color(0xFFF0F2FF))
+                  : surface,
+            ),
+            // Right border
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              child: Container(width: 0.5, color: border),
+            ),
+
+            // ── Background: hour separator lines ───────────────────────────
+            CustomPaint(
+              size: Size(_kCellWidth, columnHeight),
+              painter: _HourLinePainter(
+                rangeStartMins: rangeStart,
+                rangeEndMins: rangeStart +
+                    (columnHeight / _kPxPerMinute).round(),
+                border: border,
               ),
             ),
-            if (hasConflict)
-              Positioned(
-                top: 4,
-                right: 4,
+
+            // ── Placement mode: "+ add" hint icon ──────────────────────────
+            if (isPlacementMode && lectures.isEmpty)
+              Center(
                 child: Icon(
-                  Icons.warning_amber_rounded,
-                  size: 12,
-                  color: Colors.red.shade300,
+                  Icons.add_rounded,
+                  size: 22,
+                  color: dark
+                      ? const Color(0xFF434655)
+                      : const Color(0xFFBBBFD9),
                 ),
               ),
+
+            // ── Lecture blocks ─────────────────────────────────────────────
+            ...lectures.map((lecture) {
+              final data_ = fullState.data;
+              final subject = data_.subjectById(lecture.subjectId);
+              final hasConflict =
+                  fullState.conflicts.containsKey(lecture.id);
+
+              final startMins = _startMins(lecture);
+              final top = math.max(
+                  0.0, (startMins - rangeStart) * _kPxPerMinute);
+              final height = math.max(
+                  20.0, lecture.durationMinutes * _kPxPerMinute);
+
+              // Contiguous same-subject block detection (suppress bottom border)
+              final nextSameSubject = lectures.firstWhereOrNull(
+                (l) =>
+                    l.subjectId == lecture.subjectId &&
+                    l.startTime == lecture.endTime,
+              );
+              final suppressBottom = nextSameSubject != null;
+
+              return Positioned(
+                top: top,
+                left: 1,
+                right: 1,
+                height: height,
+                child: GestureDetector(
+                  onTap: () => onBlockTap(lecture),
+                  onLongPress: () => onBlockLongPress(lecture),
+                  behavior: HitTestBehavior.opaque,
+                  child: _LectureBlockTile(
+                    lecture: lecture,
+                    subject: subject,
+                    hasConflict: hasConflict,
+                    suppressBottom: suppressBottom,
+                    dark: dark,
+                  ),
+                ),
+              );
+            }),
           ],
         ),
       ),
     );
   }
 
-  Color _contrastColor(Color bg) {
-    final luminance = bg.computeLuminance();
-    return luminance > 0.35 ? const Color(0xFF111318) : Colors.white;
-  }
+  int _startMins(LectureBlock l) =>
+      l.startHour * 60 + l.startMinute;
 }
 
-// ─── Continuation Cell (interior of multi-hour block) ────────────────────────
+// ─── Lecture Block Tile ───────────────────────────────────────────────────────
 
-class _ContinuationCell extends StatelessWidget {
-  const _ContinuationCell({
-    required this.height,
-    required this.color,
-    required this.border,
+class _LectureBlockTile extends StatelessWidget {
+  const _LectureBlockTile({
+    required this.lecture,
+    required this.subject,
+    required this.hasConflict,
+    required this.suppressBottom,
     required this.dark,
   });
 
-  final double height;
-  final Color color;
-  final Color border;
+  final LectureBlock lecture;
+  final SubjectModel? subject;
+  final bool hasConflict;
+  final bool suppressBottom;
   final bool dark;
 
   @override
   Widget build(BuildContext context) {
+    final color = subject != null
+        ? hexToColor(subject!.effectiveColorHex)
+        : Colors.grey.shade400;
+    final textColor = color.computeLuminance() > 0.35
+        ? const Color(0xFF111318)
+        : Colors.white;
+
+    final borderRadius = BorderRadius.only(
+      topLeft:     const Radius.circular(5),
+      topRight:    const Radius.circular(5),
+      bottomLeft:  suppressBottom ? Radius.zero : const Radius.circular(5),
+      bottomRight: suppressBottom ? Radius.zero : const Radius.circular(5),
+    );
+
     return Container(
-      height: height,
-      width: _kCellWidth,
       decoration: BoxDecoration(
-        color: color,
-        border: Border(
-          left: BorderSide(color: color.withValues(alpha: 0.4), width: 0.5),
-          right: BorderSide(color: color.withValues(alpha: 0.4), width: 0.5),
-          bottom: BorderSide(color: color.withValues(alpha: 0.6), width: 0.5),
-        ),
+        color: color.withValues(alpha: 0.88),
+        borderRadius: borderRadius,
+        border: hasConflict
+            ? Border.all(color: Colors.red.shade400, width: 1.5)
+            : Border(
+                top:   BorderSide(color: color, width: 1),
+                left:  BorderSide(color: color.withValues(alpha: 0.6), width: 0.5),
+                right: BorderSide(color: color.withValues(alpha: 0.6), width: 0.5),
+                bottom: suppressBottom
+                    ? BorderSide.none
+                    : BorderSide(color: color.withValues(alpha: 0.6), width: 0.5),
+              ),
+      ),
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(5, 4, 5, 2),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  subject?.effectiveShortName ?? '?',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                    height: 1.1,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (lecture.durationMinutes >= 30)
+                  Text(
+                    '${lecture.startTime}–${lecture.endTime}',
+                    style: GoogleFonts.inter(
+                      fontSize: 9,
+                      color: textColor.withValues(alpha: 0.75),
+                      height: 1.3,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          if (hasConflict)
+            Positioned(
+              top: 3,
+              right: 3,
+              child: Icon(
+                Icons.warning_amber_rounded,
+                size: 10,
+                color: Colors.red.shade300,
+              ),
+            ),
+        ],
       ),
     );
   }
+}
+
+// ─── Hour Line Painter ────────────────────────────────────────────────────────
+
+class _HourLinePainter extends CustomPainter {
+  const _HourLinePainter({
+    required this.rangeStartMins,
+    required this.rangeEndMins,
+    required this.border,
+  });
+
+  final int rangeStartMins;
+  final int rangeEndMins;
+  final Color border;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = border
+      ..strokeWidth = 0.5;
+
+    // Draw a horizontal line at each whole-hour boundary
+    final startHour = (rangeStartMins / 60).ceil();
+    final endHour   = (rangeEndMins   / 60).floor();
+    for (int h = startHour; h <= endHour; h++) {
+      final y = (h * 60 - rangeStartMins) * _kPxPerMinute;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+
+    // Draw a subtler 30-min half-hour line
+    final halfPaint = Paint()
+      ..color = border.withValues(alpha: 0.4)
+      ..strokeWidth = 0.3;
+    for (int h = startHour; h < endHour; h++) {
+      final y = (h * 60 + 30 - rangeStartMins) * _kPxPerMinute;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), halfPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_HourLinePainter old) =>
+      old.rangeStartMins != rangeStartMins ||
+      old.rangeEndMins != rangeEndMins ||
+      old.border != border;
 }
 
 // ─── Day Header Cell ──────────────────────────────────────────────────────────
@@ -569,7 +681,7 @@ class _DayHeaderCell extends StatelessWidget {
         color: surface,
         border: Border(
           bottom: BorderSide(color: border),
-          right: BorderSide(color: border, width: 0.5),
+          right:  BorderSide(color: border, width: 0.5),
         ),
       ),
       child: Center(
@@ -602,77 +714,21 @@ class _DayHeaderCell extends StatelessWidget {
   }
 }
 
-// ─── Time Label Cell ──────────────────────────────────────────────────────────
-
-class _TimeLabelCell extends StatelessWidget {
-  const _TimeLabelCell({
-    required this.hour,
-    required this.dark,
-    required this.labelColor,
-    required this.border,
-  });
-
-  final int hour;
-  final bool dark;
-  final Color labelColor;
-  final Color border;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = _formatHour(hour);
-    return Container(
-      height: _kHourRowHeight,
-      width: _kLabelWidth,
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: border, width: 0.5),
-          right: BorderSide(color: border),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.only(right: 4, top: 6),
-        child: Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-            color: labelColor,
-          ),
-          textAlign: TextAlign.right,
-        ),
-      ),
-    );
-  }
-
-  static String _formatHour(int h) {
-    if (h == 0) return '12 AM';
-    if (h < 12) return '$h AM';
-    if (h == 12) return '12 PM';
-    return '${h - 12} PM';
-  }
-}
-
-// ─── Footer Bar ──────────────────────────────────────────────────────────────
+// ─── Footer Bar (onboarding only) ────────────────────────────────────────────
 
 class _FooterBar extends StatelessWidget {
   const _FooterBar({
-    required this.mode,
     required this.dark,
     required this.onFinish,
     required this.primary,
   });
 
-  final TimetableGridMode mode;
   final bool dark;
   final VoidCallback onFinish;
   final Color primary;
 
   @override
   Widget build(BuildContext context) {
-    final label = mode == TimetableGridMode.onboarding
-        ? 'Finish Setup →'
-        : 'Done';
-
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: BoxDecoration(
@@ -699,7 +755,7 @@ class _FooterBar extends StatelessWidget {
               elevation: 0,
             ),
             child: Text(
-              label,
+              'Finish Setup →',
               style: GoogleFonts.inter(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -709,5 +765,16 @@ class _FooterBar extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ─── Extension helpers ────────────────────────────────────────────────────────
+
+extension _FirstWhereOrNull<T> on Iterable<T> {
+  T? firstWhereOrNull(bool Function(T) test) {
+    for (final e in this) {
+      if (test(e)) return e;
+    }
+    return null;
   }
 }

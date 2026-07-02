@@ -583,7 +583,7 @@ class _EntryEditSheetState extends State<_EntryEditSheet> {
 
           // Day selector
           DropdownButtonFormField<String>(
-            value: _selectedDay,
+            initialValue: _selectedDay,
             decoration: const InputDecoration(
               labelText: 'Day *',
               prefixIcon: Icon(Icons.calendar_today_outlined),

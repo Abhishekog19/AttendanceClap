@@ -243,4 +243,4 @@ const kDayFullNames = {
 };
 
 /// Ordered list of day abbreviations (Mon-first).
-const kDayOrder = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+const kDayOrder = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];

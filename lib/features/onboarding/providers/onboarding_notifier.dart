@@ -153,6 +153,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     required String name,
     String? faculty,
     double? attendanceTarget,
+    String? colorHex,
   }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
@@ -160,6 +161,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
         name: name.trim(),
         faculty: faculty?.trim(),
         attendanceTarget: attendanceTarget,
+        colorHex: colorHex,
       );
       final subject = SubjectModel(
         id: id,
@@ -170,6 +172,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
         attendanceTarget: attendanceTarget,
+        colorHex: colorHex,
       );
       state = state.copyWith(
         subjects: [...state.subjects, subject],
@@ -185,6 +188,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     required String name,
     String? faculty,
     double? attendanceTarget,
+    String? colorHex,
   }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
@@ -196,6 +200,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
         existingId: subjectId,
         attendedClasses: existing.attendedClasses,
         totalClasses: existing.totalClasses,
+        colorHex: colorHex ?? existing.colorHex,
       );
       final updated = state.subjects.map((s) {
         if (s.id == subjectId) {
@@ -203,6 +208,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
             name: name.trim(),
             faculty: faculty?.trim(),
             attendanceTarget: attendanceTarget,
+            colorHex: colorHex ?? existing.colorHex,
           );
         }
         return s;

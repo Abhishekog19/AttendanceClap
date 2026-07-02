@@ -125,6 +125,9 @@ class _SubjectCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final target = subject.attendanceTarget ?? globalGoal;
+    final color = Color(int.parse(
+        'FF${subject.effectiveColorHex.replaceAll('#', '')}',
+        radix: 16));
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -139,16 +142,17 @@ class _SubjectCard extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: OnboardingColors.surface,
+              color: color.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
             ),
             child: Center(
               child: Text(
-                subject.name.substring(0, 1).toUpperCase(),
+                subject.effectiveShortName,
                 style: GoogleFonts.inter(
-                  fontWeight: FontWeight.w700,
-                  color: OnboardingColors.textPrimary,
-                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                  fontSize: 13,
                 ),
               ),
             ),
@@ -305,16 +309,16 @@ class _SubjectSheetState extends State<_SubjectSheet> {
   late TextEditingController _facultyCtrl;
   late double _target;
   late bool _useCustomTarget;
+  String? _selectedColor; // null = auto-assigned by repo
 
   @override
   void initState() {
     super.initState();
-    _nameCtrl =
-        TextEditingController(text: widget.existing?.name ?? '');
-    _facultyCtrl =
-        TextEditingController(text: widget.existing?.faculty ?? '');
+    _nameCtrl = TextEditingController(text: widget.existing?.name ?? '');
+    _facultyCtrl = TextEditingController(text: widget.existing?.faculty ?? '');
     _target = widget.existing?.attendanceTarget ?? widget.globalGoal;
     _useCustomTarget = widget.existing?.attendanceTarget != null;
+    _selectedColor = widget.existing?.colorHex; // null for new subjects
   }
 
   @override
@@ -373,6 +377,58 @@ class _SubjectSheetState extends State<_SubjectSheet> {
             controller: _facultyCtrl,
           ),
           const SizedBox(height: 20),
+          // ── Color picker ──────────────────────────────────────────
+          Text(
+            'Color',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: OnboardingColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: kSubjectColorPalette.map((hex) {
+              final color = Color(
+                  int.parse('FF${hex.replaceAll('#', '')}', radix: 16));
+              final isSelected = _selectedColor == hex ||
+                  (_selectedColor == null &&
+                      hex == widget.existing?.effectiveColorHex);
+              return GestureDetector(
+                onTap: () => setState(() => _selectedColor = hex),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isSelected
+                          ? Colors.white
+                          : Colors.transparent,
+                      width: 2.5,
+                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: color.withValues(alpha: 0.6),
+                              blurRadius: 6,
+                            )
+                          ]
+                        : null,
+                  ),
+                  child: isSelected
+                      ? const Icon(Icons.check_rounded,
+                          size: 16, color: Colors.white)
+                      : null,
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -456,6 +512,7 @@ class _SubjectSheetState extends State<_SubjectSheet> {
                           ? null
                           : _facultyCtrl.text,
                       attendanceTarget: customTarget,
+                      colorHex: _selectedColor,
                     );
                   } else {
                     await notifier.addSubject(
@@ -464,6 +521,7 @@ class _SubjectSheetState extends State<_SubjectSheet> {
                           ? null
                           : _facultyCtrl.text,
                       attendanceTarget: customTarget,
+                      colorHex: _selectedColor,
                     );
                   }
                   if (context.mounted) Navigator.of(context).pop();

@@ -89,7 +89,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
           IconButton(
             icon: Icon(Icons.grid_view_rounded, color: onSurfaceVariant),
             tooltip: 'Manage Timetable',
-            onPressed: () => context.push('/timetable/manage'),
+            onPressed: () => context.push('/timetable/edit'),
           ),
           // OCR import button — disabled until OCR feature is ready
           // IconButton(
@@ -1136,7 +1136,7 @@ class _EmptySchedule extends ConsumerWidget {
         title: 'No timetable yet',
         subtitle: 'Add your classes manually to get started.',
         actionLabel: 'Add Classes',
-        onAction: () => context.push('/timetable/manage'),
+        onAction: () => context.push('/timetable/edit'),
       );
     }
 
@@ -1156,7 +1156,7 @@ class _EmptySchedule extends ConsumerWidget {
       title: 'No classes today 🎉',
       subtitle: 'Enjoy your free day! Your next class is on a weekday.',
       actionLabel: 'View Full Timetable',
-      onAction: () => context.push('/timetable/manage'),
+      onAction: () => context.push('/timetable/edit'),
     );
   }
 }

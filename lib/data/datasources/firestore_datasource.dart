@@ -567,10 +567,10 @@ class FirestoreDatasource {
   ) async {
     if (counts.isEmpty) return;
     final batch = _db.batch();
-    counts.forEach((subjectId, count) {
+    counts.forEach((subjectId, counts_) {
       batch.update(_subjectsRef(uid).doc(subjectId), {
-        'attendedClasses': count.attended,
-        'totalClasses': count.total,
+        'attendedClasses': counts_.attended,
+        'totalClasses': counts_.total,
         'updatedAt': FieldValue.serverTimestamp(),
       });
     });

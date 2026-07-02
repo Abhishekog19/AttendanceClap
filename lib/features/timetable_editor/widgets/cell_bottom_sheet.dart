@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../data/models/subject_model.dart';
+import '../../../data/repositories/subject_repository.dart';
 import '../models/timetable_editor_models.dart';
 import '../providers/timetable_editor_notifier.dart';
 
@@ -170,6 +171,7 @@ class _DetailSheetState extends State<_DetailSheet> {
   late String _startTime;
   late int _durationMinutes;
   late TextEditingController _notesCtrl;
+  String? _selectedColor;
   bool _saving = false;
 
   @override
@@ -178,6 +180,7 @@ class _DetailSheetState extends State<_DetailSheet> {
     _startTime = widget.lecture.startTime;
     _durationMinutes = widget.lecture.durationMinutes;
     _notesCtrl = TextEditingController(text: widget.lecture.notes ?? '');
+    _selectedColor = widget.subject?.colorHex;
   }
 
   @override
@@ -213,6 +216,7 @@ class _DetailSheetState extends State<_DetailSheet> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
+    // Save lecture details
     await widget.ref
         .read(timetableEditorNotifierProvider.notifier)
         .updateLectureDetails(
@@ -221,6 +225,16 @@ class _DetailSheetState extends State<_DetailSheet> {
           durationMinutes: _durationMinutes,
           notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
         );
+    // Save color change if subject exists and color changed
+    final subject = widget.subject;
+    if (subject != null &&
+        _selectedColor != null &&
+        _selectedColor != subject.colorHex) {
+      final updated = subject.copyWith(colorHex: _selectedColor);
+      await widget.ref
+          .read(subjectRepositoryProvider)
+          .updateSubject(updated);
+    }
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -349,6 +363,50 @@ class _DetailSheetState extends State<_DetailSheet> {
                 ),
               ),
               const SizedBox(height: 12),
+
+              // Color picker
+              if (widget.subject != null) ...[
+                Text(
+                  'Color',
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: secondary,
+                      fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: kSubjectColorPalette.map((hex) {
+                    final c = hexToColor(hex);
+                    final sel = (_selectedColor ?? widget.subject!.effectiveColorHex) == hex;
+                    return GestureDetector(
+                      onTap: () => setState(() => _selectedColor = hex),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 100),
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: c,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: sel ? Colors.white : Colors.transparent,
+                            width: 2,
+                          ),
+                          boxShadow: sel
+                              ? [BoxShadow(color: c.withValues(alpha: 0.6), blurRadius: 5)]
+                              : null,
+                        ),
+                        child: sel
+                            ? const Icon(Icons.check_rounded,
+                                size: 14, color: Colors.white)
+                            : null,
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+              ],
 
               // Notes
               TextField(

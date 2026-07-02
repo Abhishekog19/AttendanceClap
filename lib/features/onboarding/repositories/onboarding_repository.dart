@@ -122,10 +122,12 @@ class OnboardingRepository {
       await _db.updateSubject(_uid, updated);
       return id;
     }
-    // Auto-assign color from palette (based on current subject count)
+    // Auto-assign color from palette (based on STORED colors only — effectiveColorHex
+    // would map every un-coloured subject to palette[0], making all slots appear used)
     final existingSubjects = await _db.getSubjects(_uid);
     final usedColors = existingSubjects
-        .map((s) => s.effectiveColorHex)
+        .where((s) => s.colorHex != null)
+        .map((s) => s.colorHex!)
         .toList();
     final assignedColor = colorHex ?? nextSubjectColor(usedColors);
     final assignedShortName = shortName ?? generateSubjectShortName(name);
