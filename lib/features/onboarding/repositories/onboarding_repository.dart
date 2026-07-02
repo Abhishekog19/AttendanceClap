@@ -1,12 +1,14 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../data/datasources/firestore_datasource.dart';
 import '../../../data/models/attendance_log_model.dart';
 import '../../../data/models/semester_model.dart';
 import '../../../data/models/subject_model.dart';
-import '../../../data/models/timetable_entry_model.dart';
 import '../../../data/repositories/timetable_repository.dart';
+import '../../../features/timetable_editor/models/timetable_editor_models.dart';
+import '../../../features/timetable_editor/repository/timetable_editor_repository.dart';
 
 /// Orchestrates all Firestore writes during the onboarding flow.
 ///
@@ -83,6 +85,7 @@ class OnboardingRepository {
   // ─── Subject Setup ────────────────────────────────────────────────────────
 
   /// Writes a single subject to Firestore. Safe to call multiple times (sets doc).
+  /// Auto-assigns [colorHex] and [shortName] on first creation if not provided.
   Future<String> saveSubject({
     required String name,
     String? faculty,
@@ -90,6 +93,8 @@ class OnboardingRepository {
     int attendedClasses = 0,
     int totalClasses = 0,
     String? existingId,
+    String? colorHex,
+    String? shortName,
   }) async {
     final now = DateTime.now();
     final id = existingId ?? _uuid.v4();
@@ -111,10 +116,20 @@ class OnboardingRepository {
         createdAt: createdAt,
         updatedAt: now,
         attendanceTarget: attendanceTarget,
+        colorHex: colorHex ?? existing?.colorHex,
+        shortName: shortName ?? existing?.shortName,
       );
       await _db.updateSubject(_uid, updated);
       return id;
     }
+    // Auto-assign color from palette (based on current subject count)
+    final existingSubjects = await _db.getSubjects(_uid);
+    final usedColors = existingSubjects
+        .map((s) => s.effectiveColorHex)
+        .toList();
+    final assignedColor = colorHex ?? nextSubjectColor(usedColors);
+    final assignedShortName = shortName ?? generateSubjectShortName(name);
+
     final subject = SubjectModel(
       id: id,
       name: name,
@@ -124,6 +139,8 @@ class OnboardingRepository {
       createdAt: createdAt,
       updatedAt: now,
       attendanceTarget: attendanceTarget,
+      colorHex: assignedColor,
+      shortName: assignedShortName,
     );
     await _db.addSubject(_uid, subject);
     return id;
@@ -150,36 +167,9 @@ class OnboardingRepository {
     return snap.docs.first.id;
   }
 
-  // ─── Timetable Builder ────────────────────────────────────────────────────
-
-  /// Adds a single timetable entry. Returns the Firestore document ID.
-  Future<String> addTimetableEntry({
-    required String subjectId,
-    required String subjectName,
-    required String day,
-    required String startTime,
-    required String endTime,
-    String? faculty,
-    String? room,
-  }) async {
-    final entry = TimetableEntry(
-      subjectId: subjectId,
-      subject: subjectName,
-      day: day,
-      startTime: startTime,
-      endTime: endTime,
-      faculty: faculty,
-      room: room,
-      confidence: 1.0,
-    );
-    return _timetableRepo.addTimetableEntry(entry);
-  }
-
-  Future<void> deleteTimetableEntry(String entryId) =>
-      _timetableRepo.deleteTimetableEntry(entryId);
-
-  Stream<List<TimetableEntry>> watchTimetableEntries() =>
-      _timetableRepo.watchTimetableEntries();
+  // ─── Timetable (delegates to timetable/config/lectures) ──────────────────
+  // No direct timetable_entries writes — the TimetableEditorNotifier handles
+  // all lecture CRUD via /users/{uid}/timetable/config/lectures.
 
   // ─── Holiday Calendar ─────────────────────────────────────────────────────
 
@@ -207,36 +197,43 @@ class OnboardingRepository {
   /// Method B: mark absent dates → derive absent logs from timetable.
   ///
   /// For each subject in [absentDatesBySubject], generates one
-  /// AttendanceLogModel(status=absent) per absent date per timetable slot.
+  /// AttendanceLogModel(status=absent) per absent date per lecture slot.
+  /// Reads lecture blocks directly from Firestore (timetable/config/lectures).
   /// Log IDs are derived from subjectId+date+startTime so retries are idempotent.
   Future<void> saveAbsentDates({
     required Map<String, List<DateTime>> absentDatesBySubject,
-    required List<TimetableEntry> timetableEntries,
     required Map<String, String> subjectIdToName,
   }) async {
+    // Read lectures from the canonical source
+    final editorRepo = TimetableEditorRepository(
+      firestore: FirebaseFirestore.instance,
+      auth: FirebaseAuth.instance,
+    );
+    final lectures = await editorRepo.watchLectures().first;
     final logs = <AttendanceLogModel>[];
 
     absentDatesBySubject.forEach((subjectId, dates) {
       final subjectName = subjectIdToName[subjectId] ?? '';
-      final entries =
-          timetableEntries.where((e) => e.subjectId == subjectId).toList();
+      final subjectLectures =
+          lectures.where((l) => l.subjectId == subjectId).toList();
 
       for (final date in dates) {
-        final dayName = _weekdayName(date.weekday);
-        final dayEntries = entries.where((e) => e.day == dayName).toList();
-        for (final entry in dayEntries) {
-          // Use a stable ID so repeated calls don't create duplicate logs.
+        final dayAbbr = kDayAbbreviations[_weekdayName(date.weekday)] ?? '';
+        final dayLectures =
+            subjectLectures.where((l) => l.day == dayAbbr).toList();
+        for (final lecture in dayLectures) {
           final dateStr =
               '${date.year}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}';
-          final stableId = '${subjectId}_${dateStr}_${entry.startTime.replaceAll(':', '')}';
+          final stableId =
+              '${subjectId}_${dateStr}_${lecture.startTime.replaceAll(':', '')}';
           logs.add(AttendanceLogModel(
             id: stableId,
             subjectId: subjectId,
             subjectName: subjectName,
             status: AttendanceStatus.absent,
             date: date,
-            startTime: entry.startTime,
-            endTime: entry.endTime,
+            startTime: lecture.startTime,
+            endTime: lecture.endTime,
           ));
         }
       }
@@ -248,27 +245,23 @@ class OnboardingRepository {
   // ─── Review / Finalize ────────────────────────────────────────────────────
 
   /// Generates class_sessions from the saved timetable + active semester.
+  /// Reads LectureBlocks from /users/{uid}/timetable/config/lectures.
   /// Called when the user confirms on the Review screen.
   Future<void> generateClassSessions() async {
     final semester = await _timetableRepo.getActiveSemester();
     if (semester == null) return;
 
-    final entries = await _timetableRepo.watchTimetableEntries().first;
-    if (entries.isEmpty) return;
-
-    // Build name→id map from existing timetable entries (subjectId already set)
-    final subjectIdMap = <String, String>{};
-    for (final e in entries) {
-      if (e.subjectId != null) {
-        subjectIdMap[e.subject] = e.subjectId!;
-      }
-    }
+    final editorRepo = TimetableEditorRepository(
+      firestore: FirebaseFirestore.instance,
+      auth: FirebaseAuth.instance,
+    );
+    final lectures = await editorRepo.watchLectures().first;
+    if (lectures.isEmpty) return;
 
     await _timetableRepo.deleteAllSessions();
     await _timetableRepo.saveClassSessions(
-      entries: entries,
+      lectures: lectures,
       semester: semester,
-      subjectIdMap: subjectIdMap,
     );
   }
 

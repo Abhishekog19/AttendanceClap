@@ -5,40 +5,20 @@
 /// timezone ambiguity (periods are day-of-week templates, not calendar dates).
 ///
 /// Firestore layout:
-///   /users/{uid}/timetable/config          ← single doc: defaultSchedule + daySchedules
-///   /users/{uid}/timetable/subjects/{id}   ← TimetableSubject docs
-///   /users/{uid}/timetable/lectures/{id}   ← LectureBlock docs
+///   /users/{uid}/timetable/config          ← defaultLectureDurationMinutes + gridStartHour + gridEndHour
+///   /users/{uid}/timetable/config/lectures/{id}   ← LectureBlock docs
+library;
 
 import 'dart:ui';
 
-// ─── Subject Color Palette ────────────────────────────────────────────────────
+import '../../../data/models/subject_model.dart';
 
-/// Fixed 12-color palette for auto-assigning subject colors.
-/// Colors are mid-saturation hues that look good as cell fills.
-const kSubjectColorPalette = [
-  '#E57373', // Red
-  '#FF8A65', // Deep Orange
-  '#FFB74D', // Orange
-  '#FFD54F', // Amber
-  '#81C784', // Green
-  '#4DB6AC', // Teal
-  '#4FC3F7', // Light Blue
-  '#7986CB', // Indigo
-  '#BA68C8', // Purple
-  '#F06292', // Pink
-  '#A1887F', // Brown
-  '#90A4AE', // Blue Grey
-];
-
-/// Returns the next unused color from the palette given existing colors.
-/// Cycles through the palette if all are used.
-String nextSubjectColor(List<String> usedColors) {
-  for (final c in kSubjectColorPalette) {
-    if (!usedColors.contains(c)) return c;
-  }
-  // All colors used — cycle from start
-  return kSubjectColorPalette[usedColors.length % kSubjectColorPalette.length];
-}
+// Re-export palette helpers so existing imports from here still compile.
+export '../../../data/models/subject_model.dart'
+    show
+        kSubjectColorPalette,
+        nextSubjectColor,
+        generateSubjectShortName;
 
 /// Converts a hex color string (e.g. "#E57373") to a Flutter Color.
 Color hexToColor(String hex) {
@@ -46,256 +26,94 @@ Color hexToColor(String hex) {
   return Color(int.parse('FF$h', radix: 16));
 }
 
-// ─── Short Name Generator ─────────────────────────────────────────────────────
-
-/// Auto-generates a short name from a full subject name.
-/// Examples: "Data Structures" → "DS", "Operating System" → "OS", "Maths" → "MTH"
-String generateShortName(String name) {
-  final words = name.trim().split(RegExp(r'\s+'));
-  if (words.length >= 2) {
-    // Acronym from first letter of each word, max 4 chars
-    return words.map((w) => w.isNotEmpty ? w[0].toUpperCase() : '').join().substring(0, words.length.clamp(1, 4));
-  }
-  // Single word — take first 3-4 consonants/letters
-  final upper = name.toUpperCase();
-  return upper.length <= 4 ? upper : upper.substring(0, 4);
-}
-
-// ─── TimetableSubject ─────────────────────────────────────────────────────────
-
-class TimetableSubject {
-  final String id;
-  final String name;           // full name, e.g. "Data Structures"
-  final String shortName;      // auto-generated + editable, e.g. "DS"
-  final String colorHex;       // from kSubjectColorPalette, e.g. "#E57373"
-  final double? minAttendanceRequired; // percentage, optional
-
-  const TimetableSubject({
-    required this.id,
-    required this.name,
-    required this.shortName,
-    required this.colorHex,
-    this.minAttendanceRequired,
-  });
-
-  Color get color => hexToColor(colorHex);
-
-  TimetableSubject copyWith({
-    String? id,
-    String? name,
-    String? shortName,
-    String? colorHex,
-    Object? minAttendanceRequired = _sentinel,
-  }) =>
-      TimetableSubject(
-        id: id ?? this.id,
-        name: name ?? this.name,
-        shortName: shortName ?? this.shortName,
-        colorHex: colorHex ?? this.colorHex,
-        minAttendanceRequired: minAttendanceRequired == _sentinel
-            ? this.minAttendanceRequired
-            : minAttendanceRequired as double?,
-      );
-
-  factory TimetableSubject.fromMap(String id, Map<String, dynamic> m) =>
-      TimetableSubject(
-        id: id,
-        name: m['name'] as String? ?? '',
-        shortName: m['shortName'] as String? ?? '',
-        colorHex: m['colorHex'] as String? ?? kSubjectColorPalette[0],
-        minAttendanceRequired:
-            (m['minAttendanceRequired'] as num?)?.toDouble(),
-      );
-
-  Map<String, dynamic> toMap() => {
-        'name': name,
-        'shortName': shortName,
-        'colorHex': colorHex,
-        if (minAttendanceRequired != null)
-          'minAttendanceRequired': minAttendanceRequired,
-      };
-
-  static const _sentinel = Object();
-}
-
-// ─── PeriodType ───────────────────────────────────────────────────────────────
-
-enum PeriodType { lecture, breakPeriod, lunch }
-
-// ─── PeriodSlot ───────────────────────────────────────────────────────────────
-
-class PeriodSlot {
-  final String id;
-  final String label;      // "Period 1", "Break", "Lunch"
-  final String startTime;  // "09:00" — 24hr string, no Timestamp
-  final String endTime;    // "09:50"
-  final PeriodType type;
-
-  const PeriodSlot({
-    required this.id,
-    required this.label,
-    required this.startTime,
-    required this.endTime,
-    required this.type,
-  });
-
-  PeriodSlot copyWith({
-    String? id,
-    String? label,
-    String? startTime,
-    String? endTime,
-    PeriodType? type,
-  }) =>
-      PeriodSlot(
-        id: id ?? this.id,
-        label: label ?? this.label,
-        startTime: startTime ?? this.startTime,
-        endTime: endTime ?? this.endTime,
-        type: type ?? this.type,
-      );
-
-  factory PeriodSlot.fromMap(Map<String, dynamic> m) => PeriodSlot(
-        id: m['id'] as String,
-        label: m['label'] as String,
-        startTime: m['startTime'] as String,
-        endTime: m['endTime'] as String,
-        type: PeriodType.values.byName(m['type'] as String? ?? 'lecture'),
-      );
-
-  Map<String, dynamic> toMap() => {
-        'id': id,
-        'label': label,
-        'startTime': startTime,
-        'endTime': endTime,
-        'type': type.name,
-      };
-
-  /// Duration in minutes between startTime and endTime.
-  int get durationMinutes {
-    final s = _parseTime(startTime);
-    final e = _parseTime(endTime);
-    return e - s;
-  }
-
-  static int _parseTime(String t) {
-    final parts = t.split(':');
-    return int.parse(parts[0]) * 60 + int.parse(parts[1]);
-  }
-}
-
-// ─── DaySchedule ─────────────────────────────────────────────────────────────
-
-/// One entry per day-of-week; handles irregular days (Saturday half-days, etc.)
-class DaySchedule {
-  final String day;               // "MON".."SUN"
-  final List<PeriodSlot> periods;
-  final bool usesGlobalSchedule;  // true = inherits config.defaultSchedule
-
-  const DaySchedule({
-    required this.day,
-    required this.periods,
-    required this.usesGlobalSchedule,
-  });
-
-  DaySchedule copyWith({
-    String? day,
-    List<PeriodSlot>? periods,
-    bool? usesGlobalSchedule,
-  }) =>
-      DaySchedule(
-        day: day ?? this.day,
-        periods: periods ?? this.periods,
-        usesGlobalSchedule: usesGlobalSchedule ?? this.usesGlobalSchedule,
-      );
-
-  factory DaySchedule.fromMap(String day, Map<String, dynamic> m) =>
-      DaySchedule(
-        day: day,
-        periods: (m['periods'] as List<dynamic>? ?? [])
-            .map((p) => PeriodSlot.fromMap(p as Map<String, dynamic>))
-            .toList(),
-        usesGlobalSchedule: m['usesGlobalSchedule'] as bool? ?? true,
-      );
-
-  Map<String, dynamic> toMap() => {
-        'periods': periods.map((p) => p.toMap()).toList(),
-        'usesGlobalSchedule': usesGlobalSchedule,
-      };
-}
-
 // ─── LectureBlock ─────────────────────────────────────────────────────────────
 
+/// One scheduled lecture slot in the weekly timetable.
+/// Uses absolute wall-clock start time + duration instead of period indices.
 class LectureBlock {
   final String id;
-  final String day;           // "MON".."SUN"
+  final String day;             // "MON".."SUN"
   final String subjectId;
-  final String startPeriodId;
-  final int spanPeriods;      // 1 = single period, 2+ = multi-period/lab
+  final String startTime;       // "HH:mm" 24hr, e.g. "09:00"
+  final int durationMinutes;    // duration in minutes, e.g. 50
   final String? facultyName;
   final String? classroom;
   final String? notes;
-  final bool isLab;
 
   const LectureBlock({
     required this.id,
     required this.day,
     required this.subjectId,
-    required this.startPeriodId,
-    required this.spanPeriods,
+    required this.startTime,
+    required this.durationMinutes,
     this.facultyName,
     this.classroom,
     this.notes,
-    required this.isLab,
   });
+
+  /// Computed end time string "HH:mm".
+  String get endTime {
+    final parts = startTime.split(':');
+    final startMins = int.parse(parts[0]) * 60 + int.parse(parts[1]);
+    final endMins = startMins + durationMinutes;
+    final h = endMins ~/ 60;
+    final m = endMins % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+  }
+
+  /// The hour (0-23) in which this lecture starts.
+  int get startHour => int.parse(startTime.split(':')[0]);
+
+  /// The minute within the starting hour.
+  int get startMinute => int.parse(startTime.split(':')[1]);
 
   LectureBlock copyWith({
     String? id,
     String? day,
     String? subjectId,
-    String? startPeriodId,
-    int? spanPeriods,
+    String? startTime,
+    int? durationMinutes,
     Object? facultyName = _sentinel,
     Object? classroom = _sentinel,
     Object? notes = _sentinel,
-    bool? isLab,
   }) =>
       LectureBlock(
         id: id ?? this.id,
         day: day ?? this.day,
         subjectId: subjectId ?? this.subjectId,
-        startPeriodId: startPeriodId ?? this.startPeriodId,
-        spanPeriods: spanPeriods ?? this.spanPeriods,
-        facultyName: facultyName == _sentinel
-            ? this.facultyName
-            : facultyName as String?,
+        startTime: startTime ?? this.startTime,
+        durationMinutes: durationMinutes ?? this.durationMinutes,
+        facultyName:
+            facultyName == _sentinel ? this.facultyName : facultyName as String?,
         classroom:
             classroom == _sentinel ? this.classroom : classroom as String?,
         notes: notes == _sentinel ? this.notes : notes as String?,
-        isLab: isLab ?? this.isLab,
       );
 
-  factory LectureBlock.fromMap(String id, Map<String, dynamic> m) =>
-      LectureBlock(
-        id: id,
-        day: m['day'] as String,
-        subjectId: m['subjectId'] as String,
-        startPeriodId: m['startPeriodId'] as String,
-        spanPeriods: (m['spanPeriods'] as num?)?.toInt() ?? 1,
-        facultyName: m['facultyName'] as String?,
-        classroom: m['classroom'] as String?,
-        notes: m['notes'] as String?,
-        isLab: m['isLab'] as bool? ?? false,
-      );
+  factory LectureBlock.fromMap(String id, Map<String, dynamic> m) {
+    // Handle legacy period-indexed docs gracefully — treat them as "09:00" / 50 min
+    final startTime = m['startTime'] as String? ?? '09:00';
+    final durationMinutes = (m['durationMinutes'] as num?)?.toInt() ?? 50;
+    return LectureBlock(
+      id: id,
+      day: m['day'] as String,
+      subjectId: m['subjectId'] as String,
+      startTime: startTime,
+      durationMinutes: durationMinutes,
+      facultyName: m['facultyName'] as String?,
+      classroom: m['classroom'] as String?,
+      notes: m['notes'] as String?,
+    );
+  }
 
   Map<String, dynamic> toMap() => {
         'day': day,
         'subjectId': subjectId,
-        'startPeriodId': startPeriodId,
-        'spanPeriods': spanPeriods,
+        'startTime': startTime,
+        'durationMinutes': durationMinutes,
         if (facultyName != null) 'facultyName': facultyName,
         if (classroom != null) 'classroom': classroom,
         if (notes != null) 'notes': notes,
-        'isLab': isLab,
       };
 
   static const _sentinel = Object();
@@ -313,59 +131,72 @@ class ConflictInfo {
 // ─── TimetableEditorState ────────────────────────────────────────────────────
 
 /// In-memory aggregate the TimetableGrid widget renders from.
-/// Assembled from three Firestore listeners via the Riverpod notifier.
+/// Assembled from Firestore listeners via the Riverpod notifier.
 class TimetableEditorState {
-  final List<TimetableSubject> subjects;
-  final List<PeriodSlot> defaultSchedule;
-  final Map<String, DaySchedule> daySchedules; // keyed by "MON".."SUN"
+  final List<SubjectModel> subjects;
   final List<LectureBlock> lectures;
+  final int defaultLectureDurationMinutes; // default 60
+  final int gridStartHour;                 // grid visible range start (default 8)
+  final int gridEndHour;                   // grid visible range end (default 22)
   final bool isLoading;
   final String? error;
 
   const TimetableEditorState({
     this.subjects = const [],
-    this.defaultSchedule = const [],
-    this.daySchedules = const {},
     this.lectures = const [],
+    this.defaultLectureDurationMinutes = 60,
+    this.gridStartHour = 8,
+    this.gridEndHour = 22,
     this.isLoading = false,
     this.error,
   });
 
   TimetableEditorState copyWith({
-    List<TimetableSubject>? subjects,
-    List<PeriodSlot>? defaultSchedule,
-    Map<String, DaySchedule>? daySchedules,
+    List<SubjectModel>? subjects,
     List<LectureBlock>? lectures,
+    int? defaultLectureDurationMinutes,
+    int? gridStartHour,
+    int? gridEndHour,
     bool? isLoading,
     Object? error = _sentinel,
   }) =>
       TimetableEditorState(
         subjects: subjects ?? this.subjects,
-        defaultSchedule: defaultSchedule ?? this.defaultSchedule,
-        daySchedules: daySchedules ?? this.daySchedules,
         lectures: lectures ?? this.lectures,
+        defaultLectureDurationMinutes:
+            defaultLectureDurationMinutes ?? this.defaultLectureDurationMinutes,
+        gridStartHour: gridStartHour ?? this.gridStartHour,
+        gridEndHour: gridEndHour ?? this.gridEndHour,
         isLoading: isLoading ?? this.isLoading,
         error: error == _sentinel ? this.error : error as String?,
       );
-
-  /// Returns the effective period list for a given day abbreviation.
-  /// Respects per-day overrides; falls back to defaultSchedule.
-  List<PeriodSlot> periodsForDay(String day) {
-    final daySchedule = daySchedules[day];
-    if (daySchedule != null && !daySchedule.usesGlobalSchedule) {
-      return daySchedule.periods;
-    }
-    return defaultSchedule;
-  }
 
   /// Returns lecture blocks for a specific day.
   List<LectureBlock> lecturesForDay(String day) =>
       lectures.where((l) => l.day == day).toList();
 
   /// Looks up a subject by ID; returns null if not found.
-  TimetableSubject? subjectById(String id) {
+  SubjectModel? subjectById(String id) {
     try {
       return subjects.firstWhere((s) => s.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Finds a lecture that overlaps the given hour row for a day.
+  /// A lecture overlaps hour H if it starts before H+1 and ends after H.
+  LectureBlock? lectureAtHour(String day, int hour) {
+    final hourStart = hour * 60; // minutes since midnight
+    final hourEnd = hourStart + 60;
+    try {
+      return lectures.firstWhere((l) {
+        if (l.day != day) return false;
+        final lStart = l.startHour * 60 + l.startMinute;
+        final lEnd = lStart + l.durationMinutes;
+        // Overlap: lecture starts before hour ends AND lecture ends after hour starts
+        return lStart < hourEnd && lEnd > hourStart;
+      });
     } catch (_) {
       return null;
     }
@@ -377,12 +208,12 @@ class TimetableEditorState {
     return weekdays.where((d) => lectures.any((l) => l.day == d)).length;
   }
 
-  /// Total weekly lecture count (non-break slots only).
-  int get totalWeeklyLectures =>
-      lectures.where((l) => !l.isLab).length + lectures.where((l) => l.isLab).length;
+  /// Total weekly lecture count.
+  int get totalWeeklyLectures => lectures.length;
 
-  /// Lab session count.
-  int get labSessionCount => lectures.where((l) => l.isLab).length;
+  /// Ordered list of hour rows to display (from gridStartHour to gridEndHour - 1).
+  List<int> get hourRows =>
+      List.generate(gridEndHour - gridStartHour, (i) => gridStartHour + i);
 
   static const _sentinel = Object();
 }

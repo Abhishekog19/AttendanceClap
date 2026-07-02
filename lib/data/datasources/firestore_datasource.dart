@@ -394,20 +394,26 @@ class FirestoreDatasource {
 
   /// Deletes all timetable-related data for a user.
   /// Used when the user wants to replace their active timetable.
-  /// Collections cleared: timetable_entries, class_sessions, subjects,
-  ///   attendance_logs, semesters.
+  /// Collections cleared: class_sessions, subjects, attendance_logs, semesters,
+  ///   and timetable/config/lectures subcollection.
   Future<void> deleteAllTimetableData(String uid) async {
+    // Clear flat collections
     final collections = [
-      _userDoc(uid).collection('timetable_entries'),
       _userDoc(uid).collection('class_sessions'),
       _userDoc(uid).collection('subjects'),
       _userDoc(uid).collection('attendance_logs'),
       _userDoc(uid).collection('semesters'),
     ];
-
     for (final col in collections) {
       await _deleteCollection(col);
     }
+    // Clear timetable/config/lectures subcollection
+    await _deleteCollection(
+      _userDoc(uid)
+          .collection('timetable')
+          .doc('config')
+          .collection('lectures'),
+    );
   }
 
   Future<void> _deleteCollection(
@@ -425,10 +431,12 @@ class FirestoreDatasource {
     } while (snap.docs.length == batchSize);
   }
 
-  /// Returns true if the user has any timetable entries saved.
+  /// Returns true if the user has any lectures saved in timetable/config/lectures.
   Future<bool> hasActiveTimetable(String uid) async {
     final snap = await _userDoc(uid)
-        .collection('timetable_entries')
+        .collection('timetable')
+        .doc('config')
+        .collection('lectures')
         .limit(1)
         .get();
     return snap.docs.isNotEmpty;

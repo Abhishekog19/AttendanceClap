@@ -10,6 +10,7 @@ import '../models/class_session_model.dart';
 import '../models/daily_schedule_override_model.dart';
 import '../models/semester_model.dart';
 import '../models/timetable_entry_model.dart';
+import '../../features/timetable_editor/models/timetable_editor_models.dart';
 
 import 'auth_repository.dart';
 
@@ -253,7 +254,55 @@ class TimetableRepository {
 
   // ── Generate & save class sessions ───────────────────────────────────────
 
+  /// Converts [LectureBlock]s + a [Semester] into flat class session docs.
+  /// The day field on LectureBlock is a 3-letter abbreviation ("MON".."SUN").
+  /// Maps it to DateTime weekday (1=Monday, 7=Sunday) using [kDayOrder].
   Future<int> saveClassSessions({
+    required List<LectureBlock> lectures,
+    required Semester semester,
+  }) async {
+    final sessions = <ClassSession>[];
+
+    for (final lecture in lectures) {
+      // Map 3-letter abbr to weekday number (Mon=1 .. Sun=7)
+      final weekday = kDayOrder.indexOf(lecture.day) + 1; // 0-indexed + 1
+      if (weekday == 0) continue; // unrecognised day
+
+      final dates = semester.getDatesForWeekday(weekday);
+
+      for (final date in dates) {
+        sessions.add(ClassSession(
+          id: _uuid.v4(),
+          subjectId: lecture.subjectId,
+          subjectName: '', // resolved at display layer via SubjectModel
+          date: date,
+          startTime: lecture.startTime,
+          endTime: lecture.endTime,
+          faculty: lecture.facultyName,
+          room: lecture.classroom,
+          status: AttendanceStatus.notMarked,
+          uid: _uid,
+        ));
+      }
+    }
+
+    // Batch-write in chunks of 500 (Firestore limit)
+    const chunkSize = 500;
+    for (int i = 0; i < sessions.length; i += chunkSize) {
+      final chunk = sessions.skip(i).take(chunkSize).toList();
+      final batch = _firestore.batch();
+      for (final session in chunk) {
+        batch.set(_sessionsCol.doc(session.id), session.toMap());
+      }
+      await batch.commit();
+    }
+
+    return sessions.length;
+  }
+
+  /// Backward-compatible variant for OCR / SemesterProvider flow.
+  /// Converts legacy [TimetableEntry]s + a [Semester] into class session docs.
+  Future<int> saveClassSessionsFromEntries({
     required List<TimetableEntry> entries,
     required Semester semester,
     required Map<String, String> subjectIdMap,
@@ -263,18 +312,13 @@ class TimetableRepository {
       'Monday', 'Tuesday', 'Wednesday', 'Thursday',
       'Friday', 'Saturday', 'Sunday',
     ];
-
     final sessions = <ClassSession>[];
-
     for (int i = 0; i < days.length; i++) {
       final day = days[i];
-      final weekday = i + 1; // DateTime.monday = 1
+      final weekday = i + 1;
       final dayEntries = entries.where((e) => e.day == day).toList();
-
       if (dayEntries.isEmpty) continue;
-
       final dates = semester.getDatesForWeekday(weekday);
-
       for (final date in dates) {
         for (final entry in dayEntries) {
           sessions.add(ClassSession(
@@ -292,10 +336,7 @@ class TimetableRepository {
         }
       }
     }
-
-    // Batch-write in chunks of 500 (Firestore limit)
     const chunkSize = 500;
-
     for (int i = 0; i < sessions.length; i += chunkSize) {
       final chunk = sessions.skip(i).take(chunkSize).toList();
       final batch = _firestore.batch();
@@ -305,7 +346,6 @@ class TimetableRepository {
       await batch.commit();
       onProgress?.call((i + chunk.length) / sessions.length);
     }
-
     return sessions.length;
   }
 

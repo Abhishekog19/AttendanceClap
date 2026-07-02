@@ -41,7 +41,7 @@ class _ObAttendanceImportScreenState
       onSkip: () async {
         await notifier.skipImport();
         if (context.mounted) {
-          context.go(OnboardingStep.routeFor(OnboardingStep.review));
+          notifier.navigateNext(context, OnboardingStep.import);
         }
       },
       onBack: () =>
@@ -122,7 +122,7 @@ class _ObAttendanceImportScreenState
         onPressed: () async {
           final ok = await notifier.saveImport();
           if (ok && context.mounted) {
-            context.go(OnboardingStep.routeFor(OnboardingStep.review));
+            notifier.navigateNext(context, OnboardingStep.import);
           }
         },
       ),

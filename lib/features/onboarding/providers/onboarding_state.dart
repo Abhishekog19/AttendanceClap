@@ -1,6 +1,5 @@
 import 'package:equatable/equatable.dart';
 import '../../../data/models/subject_model.dart';
-import '../../../data/models/timetable_entry_model.dart';
 
 // ─── Onboarding Step Keys ─────────────────────────────────────────────────────
 
@@ -10,7 +9,6 @@ class OnboardingStep {
   static const college = 'college';
   static const semester = 'semester';
   static const subjects = 'subjects';
-  static const periodTiming = 'periodTiming'; // NEW: period setup before grid
   static const timetable = 'timetable';
   static const holidays = 'holidays';
   static const import = 'import';
@@ -19,14 +17,14 @@ class OnboardingStep {
 
   /// Ordered list of all steps for progress indicator.
   static const all = [
-    welcome, college, semester, subjects, periodTiming, timetable, holidays, import, review,
+    welcome, college, semester, subjects, timetable, holidays, import, review,
   ];
 
   /// Mandatory steps — cannot be skipped.
   static const mandatory = {welcome, college, semester, subjects};
 
   /// Optional steps — have a Skip button.
-  static const optional = {periodTiming, timetable, holidays, import};
+  static const optional = {timetable, holidays, import};
 
   /// Returns 0-based index of step in the flow (for progress bar).
   static int indexOf(String step) => all.indexOf(step);
@@ -45,7 +43,6 @@ class OnboardingStep {
       case college: return '/onboarding/college';
       case semester: return '/onboarding/semester';
       case subjects: return '/onboarding/subjects';
-      case periodTiming: return '/onboarding/period-timing';
       case timetable: return '/onboarding/timetable';
       case holidays: return '/onboarding/holidays';
       case import: return '/onboarding/import';
@@ -138,8 +135,6 @@ class OnboardingState extends Equatable {
   final List<SubjectModel> subjects;
 
   // ── Timetable ─────────────────────────────────────────────────────────────
-  /// Saved timetable entries (read from Firestore stream, not in-memory only).
-  final List<TimetableEntry> timetableEntries;
   final bool timetableSkipped;
 
   // ── Holidays ──────────────────────────────────────────────────────────────
@@ -168,7 +163,6 @@ class OnboardingState extends Equatable {
     // Subjects
     this.subjects = const [],
     // Timetable
-    this.timetableEntries = const [],
     this.timetableSkipped = false,
     // Holidays
     this.holidays = const [],
@@ -209,7 +203,6 @@ class OnboardingState extends Equatable {
     double? attendanceGoal,
     Object? semesterId = _sentinel,
     List<SubjectModel>? subjects,
-    List<TimetableEntry>? timetableEntries,
     bool? timetableSkipped,
     List<DateTime>? holidays,
     bool? holidaysSkipped,
@@ -235,7 +228,6 @@ class OnboardingState extends Equatable {
         semesterId:
             semesterId == _sentinel ? this.semesterId : semesterId as String?,
         subjects: subjects ?? this.subjects,
-        timetableEntries: timetableEntries ?? this.timetableEntries,
         timetableSkipped: timetableSkipped ?? this.timetableSkipped,
         holidays: holidays ?? this.holidays,
         holidaysSkipped: holidaysSkipped ?? this.holidaysSkipped,
@@ -250,7 +242,7 @@ class OnboardingState extends Equatable {
         currentStep, isLoading, error,
         collegeName, courseName, year, section,
         semesterName, semesterStart, semesterEnd, attendanceGoal, semesterId,
-        subjects, timetableEntries, timetableSkipped,
+        subjects, timetableSkipped,
         holidays, holidaysSkipped,
         importData, importSkipped,
       ];

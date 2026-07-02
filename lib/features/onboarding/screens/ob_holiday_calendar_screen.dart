@@ -37,7 +37,7 @@ class _ObHolidayCalendarScreenState
       onSkip: () async {
         await notifier.skipHolidays();
         if (context.mounted) {
-          context.go(OnboardingStep.routeFor(OnboardingStep.import));
+          notifier.navigateNext(context, OnboardingStep.holidays);
         }
       },
       onBack: () =>
@@ -118,7 +118,7 @@ class _ObHolidayCalendarScreenState
         onPressed: () async {
           await notifier.completeHolidays();
           if (context.mounted) {
-            context.go(OnboardingStep.routeFor(OnboardingStep.import));
+            notifier.navigateNext(context, OnboardingStep.holidays);
           }
         },
       ),

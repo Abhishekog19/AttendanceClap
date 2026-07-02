@@ -10,14 +10,7 @@ import '../../features/dashboard/screens/dashboard_screen.dart';
 import '../../features/subjects/screens/subjects_screen.dart';
 import '../../features/subjects/screens/add_edit_subject_screen.dart';
 import '../../features/timetable/screens/timetable_screen.dart';
-// OCR feature — disabled until ready
-// import '../../features/timetable/screens/timetable_upload_screen.dart';
-// import '../../features/timetable/screens/timetable_review_screen.dart';
 import '../../features/timetable/screens/semester_setup_screen.dart';
-import '../../features/timetable/screens/schedule_preview_screen.dart';
-import '../../features/timetable/screens/manage_timetable_screen.dart';
-import '../../features/timetable/screens/manual_entry_screen.dart';
-import '../../features/timetable/screens/timetable_builder_screen.dart';
 import '../../features/predictor/screens/predictor_screen.dart';
 import '../../features/premium/screens/premium_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
@@ -28,7 +21,6 @@ import '../../features/notifications/screens/notification_settings_screen.dart';
 import '../../features/notifications/screens/notification_center_screen.dart';
 import '../../shared/widgets/main_shell.dart';
 import '../../data/models/subject_model.dart';
-import '../../data/models/timetable_entry_model.dart';
 
 // ─── Onboarding screens ────────────────────────────────────────────────────────
 import '../../features/onboarding/screens/ob_welcome_screen.dart';
@@ -41,7 +33,6 @@ import '../../features/onboarding/screens/ob_review_screen.dart';
 import '../../features/onboarding/screens/ob_success_screen.dart';
 import '../../features/onboarding/providers/onboarding_state.dart';
 // ─── Timetable Editor (new grid-based editor) ─────────────────────────────────
-import '../../features/timetable_editor/screens/period_timing_setup_screen.dart';
 import '../../features/timetable_editor/screens/ob_timetable_grid_screen.dart';
 import '../../features/timetable_editor/screens/edit_timetable_screen.dart';
 
@@ -132,16 +123,10 @@ GoRouter appRouter(Ref ref) {
         name: 'obSubjects',
         builder: (_, __) => const ObSubjectSetupScreen(),
       ),
-      // NEW: Period timing setup (between subjects and timetable grid)
-      GoRoute(
-        path: '/onboarding/period-timing',
-        name: 'obPeriodTiming',
-        builder: (_, __) => const PeriodTimingSetupScreen(),
-      ),
       GoRoute(
         path: '/onboarding/timetable',
         name: 'obTimetable',
-        builder: (_, __) => const ObTimetableGridScreen(), // replaced with new grid
+        builder: (_, __) => const ObTimetableGridScreen(),
       ),
       GoRoute(
         path: '/onboarding/holidays',
@@ -200,11 +185,6 @@ GoRouter appRouter(Ref ref) {
             name: 'predictor',
             builder: (context, state) => const PredictorScreen(),
           ),
-          // GoRoute(
-          //   path: '/analytics',
-          //   name: 'analytics',
-          //   builder: (context, state) => const AnalyticsScreen(),
-          // ),
           GoRoute(
             path: '/profile',
             name: 'profile',
@@ -253,47 +233,12 @@ GoRouter appRouter(Ref ref) {
         name: 'premium',
         builder: (context, state) => const PremiumScreen(),
       ),
-      // ─── Timetable OCR Routes — disabled until OCR feature is ready ────────────
-      // GoRoute(
-      //   path: '/timetable/upload',
-      //   name: 'timetableUpload',
-      //   builder: (context, state) => const TimetableUploadScreen(),
-      // ),
-      // GoRoute(
-      //   path: '/timetable/review',
-      //   name: 'timetableReview',
-      //   builder: (context, state) => const TimetableReviewScreen(),
-      // ),
       GoRoute(
         path: '/timetable/semester-setup',
         name: 'semesterSetup',
         builder: (context, state) => const SemesterSetupScreen(),
       ),
-      GoRoute(
-        path: '/timetable/schedule-preview',
-        name: 'schedulePreview',
-        builder: (context, state) => const SchedulePreviewScreen(),
-      ),
-      // ─── Timetable Manual Management Routes ───────────────────────────────────
-      GoRoute(
-        path: '/timetable/manage',
-        name: 'manageTimetable',
-        builder: (context, state) => const ManageTimetableScreen(),
-      ),
-      GoRoute(
-        path: '/timetable/manual-entry',
-        name: 'manualEntry',
-        builder: (context, state) {
-          final existing = state.extra as TimetableEntry?;
-          return ManualEntryScreen(existing: existing);
-        },
-      ),
-      GoRoute(
-        path: '/timetable/builder',
-        name: 'timetableBuilder',
-        builder: (context, state) => const TimetableBuilderScreen(),
-      ),
-      // NEW: Grid-based timetable editor (post-onboarding)
+      // ─── Timetable Editor (post-onboarding) ───────────────────────────────────
       GoRoute(
         path: '/timetable/edit',
         name: 'editTimetable',

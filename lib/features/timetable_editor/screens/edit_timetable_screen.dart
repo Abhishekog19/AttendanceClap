@@ -3,6 +3,7 @@
 /// Post-onboarding timetable editor. No wizard chrome —
 /// just a top app bar with a "Done" back button and the shared TimetableGrid.
 /// Accessed from Settings, Profile, or the main Timetable screen.
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

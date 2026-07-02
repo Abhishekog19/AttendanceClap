@@ -1,12 +1,15 @@
 /// Timetable Editor Repository
 ///
-/// Handles all Firestore CRUD for the new timetable editor schema:
-///   /users/{uid}/timetable/config          ← defaultSchedule + daySchedules
-///   /users/{uid}/timetable/subjects/{id}   ← TimetableSubject docs
-///   /users/{uid}/timetable/lectures/{id}   ← LectureBlock docs
+/// Handles all Firestore CRUD for the timetable editor schema:
+///   /users/{uid}/timetable/config          ← grid config (durations, visible hour range)
+///   /users/{uid}/timetable/config/lectures/{id}   ← LectureBlock docs
+///
+/// Subjects are now read from the canonical /users/{uid}/subjects collection
+/// (via subjectsStreamProvider) — no separate timetable subjects subcollection.
 ///
 /// All write methods fire-and-forget the Firestore call (don't await in UI path).
 /// The caller (TimetableEditorNotifier) updates local state first for instant UI.
+library;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -50,13 +53,6 @@ class TimetableEditorRepository {
       .collection('timetable')
       .doc('config');
 
-  CollectionReference<Map<String, dynamic>> get _subjectsCol => _firestore
-      .collection('users')
-      .doc(_uid)
-      .collection('timetable')
-      .doc('config')
-      .collection('subjects');
-
   CollectionReference<Map<String, dynamic>> get _lecturesCol => _firestore
       .collection('users')
       .doc(_uid)
@@ -64,60 +60,27 @@ class TimetableEditorRepository {
       .doc('config')
       .collection('lectures');
 
-  // ── Config (schedule) ────────────────────────────────────────────────────────
+  // ── Config (grid settings) ────────────────────────────────────────────────
 
-  /// Stream of the config doc — delivers defaultSchedule + daySchedules.
+  /// Stream of the config doc — delivers grid settings.
   Stream<Map<String, dynamic>> watchConfig() {
     return _configDoc.snapshots().map((snap) => snap.data() ?? {});
   }
 
-  /// Overwrites the defaultSchedule in the config doc.
-  Future<void> saveDefaultSchedule(List<PeriodSlot> slots) {
-    return _configDoc.set(
-      {'defaultSchedule': slots.map((s) => s.toMap()).toList()},
-      SetOptions(merge: true),
-    );
-  }
-
-  /// Overwrites a single day's custom schedule in the config doc.
-  Future<void> saveDaySchedule(String day, DaySchedule schedule) {
-    return _configDoc.set(
-      {'daySchedules': {day: schedule.toMap()}},
-      SetOptions(merge: true),
-    );
-  }
-
-  /// Clears a day's custom schedule (reverts to global).
-  Future<void> clearDaySchedule(String day) {
-    return _configDoc.update({
-      'daySchedules.$day': FieldValue.delete(),
-    });
-  }
-
-  // ── Subjects ─────────────────────────────────────────────────────────────────
-
-  /// Real-time stream of all timetable subjects.
-  Stream<List<TimetableSubject>> watchSubjects() {
-    return _subjectsCol.snapshots().map((snap) => snap.docs
-        .map((d) => TimetableSubject.fromMap(d.id, d.data()))
-        .toList());
-  }
-
-  /// Adds a new subject. Returns the generated doc ID.
-  Future<String> addSubject(TimetableSubject subject) async {
-    final id = subject.id.isEmpty ? _uuid.v4() : subject.id;
-    await _subjectsCol.doc(id).set(subject.toMap());
-    return id;
-  }
-
-  /// Updates an existing subject.
-  Future<void> updateSubject(TimetableSubject subject) {
-    return _subjectsCol.doc(subject.id).set(subject.toMap());
-  }
-
-  /// Deletes a subject by ID.
-  Future<void> deleteSubject(String id) {
-    return _subjectsCol.doc(id).delete();
+  /// Saves grid configuration to the config doc.
+  Future<void> saveGridConfig({
+    int? defaultLectureDurationMinutes,
+    int? gridStartHour,
+    int? gridEndHour,
+  }) {
+    final data = <String, dynamic>{};
+    if (defaultLectureDurationMinutes != null) {
+      data['defaultLectureDurationMinutes'] = defaultLectureDurationMinutes;
+    }
+    if (gridStartHour != null) data['gridStartHour'] = gridStartHour;
+    if (gridEndHour != null) data['gridEndHour'] = gridEndHour;
+    if (data.isEmpty) return Future.value();
+    return _configDoc.set(data, SetOptions(merge: true));
   }
 
   // ── Lectures ─────────────────────────────────────────────────────────────────
@@ -144,35 +107,6 @@ class TimetableEditorRepository {
   /// Deletes a lecture by ID.
   Future<void> deleteLecture(String id) {
     return _lecturesCol.doc(id).delete();
-  }
-
-  /// Batch-adds multiple lectures (used for day-copy operations).
-  Future<void> addLectures(List<LectureBlock> lectures) async {
-    if (lectures.isEmpty) return;
-    const chunkSize = 500;
-    for (int i = 0; i < lectures.length; i += chunkSize) {
-      final chunk = lectures.skip(i).take(chunkSize).toList();
-      final batch = _firestore.batch();
-      for (final l in chunk) {
-        final id = l.id.isEmpty ? _uuid.v4() : l.id;
-        batch.set(_lecturesCol.doc(id), l.toMap());
-      }
-      await batch.commit();
-    }
-  }
-
-  /// Batch-deletes multiple lectures by ID.
-  Future<void> deleteLectures(List<String> ids) async {
-    if (ids.isEmpty) return;
-    const chunkSize = 500;
-    for (int i = 0; i < ids.length; i += chunkSize) {
-      final chunk = ids.skip(i).take(chunkSize).toList();
-      final batch = _firestore.batch();
-      for (final id in chunk) {
-        batch.delete(_lecturesCol.doc(id));
-      }
-      await batch.commit();
-    }
   }
 
   /// Generates a fresh UUID — useful for pre-assigning IDs before writes.
