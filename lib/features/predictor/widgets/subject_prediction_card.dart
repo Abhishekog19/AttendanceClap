@@ -234,7 +234,7 @@ class _SubjectPredictionCardState extends State<SubjectPredictionCard>
                       child: Text(
                         'Need ${widget.prediction.classesNeeded} more consecutive classes to reach '
                         '${widget.prediction.goal.toStringAsFixed(0)}%',
-                        style: TextStyle(
+                        style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w500,
                             color: AppColors.error),

@@ -91,7 +91,7 @@ class _ObSemesterSetupScreenState
           ),
           const SizedBox(height: 36),
           // ── Semester name ─────────────────────────────────────────
-          _Label('Semester Name'),
+          const _Label('Semester Name'),
           const SizedBox(height: 8),
           TextField(
             controller: _nameCtrl,
@@ -154,7 +154,7 @@ class _ObSemesterSetupScreenState
           ],
           const SizedBox(height: 32),
           // ── Attendance goal ───────────────────────────────────────
-          _Label('Global Attendance Target'),
+          const _Label('Global Attendance Target'),
           const SizedBox(height: 4),
           Text(
             'Minimum attendance percentage required across all subjects',
@@ -168,7 +168,7 @@ class _ObSemesterSetupScreenState
             children: [
               Expanded(
                 child: SliderTheme(
-                  data: SliderThemeData(
+                  data: const SliderThemeData(
                     activeTrackColor: OnboardingColors.primary,
                     inactiveTrackColor: OnboardingColors.progressBg,
                     thumbColor: OnboardingColors.primary,

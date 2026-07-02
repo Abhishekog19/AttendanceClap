@@ -511,7 +511,6 @@ class TimetableRepository {
     final existingLogsMap = await _ds.getLogsForSessions(_uid, sessionIds);
 
     // Step 2: Build all write operations
-    final now = DateTime.now();
     const chunkSize = 400; // Stay well under 500 batch limit (each session = 2 writes)
 
     for (int i = 0; i < toMark.length; i += chunkSize) {

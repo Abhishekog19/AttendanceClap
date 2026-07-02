@@ -1229,7 +1229,7 @@ class _SetupSemesterPrompt extends StatelessWidget {
               ),
               child: Column(
                 children: [
-                  _Step(
+                  const _Step(
                       number: 1,
                       label: 'Build timetable',
                       done: true,

@@ -28,7 +28,7 @@ class NotificationChannels {
   // ── Android channel definitions ──────────────────────────────────────────────
 
   static List<AndroidNotificationChannel> get all => [
-        AndroidNotificationChannel(
+        const AndroidNotificationChannel(
           classReminders,
           'Class Reminders',
           description: 'Reminders for your upcoming classes',
@@ -36,7 +36,7 @@ class NotificationChannels {
           playSound: true,
           enableVibration: true,
         ),
-        AndroidNotificationChannel(
+        const AndroidNotificationChannel(
           attendanceActions,
           'Attendance Actions',
           description: 'Mark your attendance without opening the app',
@@ -44,7 +44,7 @@ class NotificationChannels {
           playSound: true,
           enableVibration: true,
         ),
-        AndroidNotificationChannel(
+        const AndroidNotificationChannel(
           attendanceAlerts,
           'Attendance Alerts',
           description: 'Warnings when your attendance drops below target',
@@ -52,7 +52,7 @@ class NotificationChannels {
           playSound: true,
           enableVibration: true,
         ),
-        AndroidNotificationChannel(
+        const AndroidNotificationChannel(
           planningInsights,
           'Planning & Insights',
           description: 'Safe bunk planner and daily attendance summary',

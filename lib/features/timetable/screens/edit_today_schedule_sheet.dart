@@ -654,13 +654,13 @@ class _SessionEditTile extends StatelessWidget {
                     const Text('Reschedule Time'),
                   ]),
                 ),
-                PopupMenuItem(
+                const PopupMenuItem(
                   value: 'cancel',
                   child: Row(children: [
-                    const Icon(Icons.block,
+                    Icon(Icons.block,
                         size: 16, color: AppColors.error),
-                    const SizedBox(width: 8),
-                    const Text('Cancel Period',
+                    SizedBox(width: 8),
+                    Text('Cancel Period',
                         style: TextStyle(color: AppColors.error)),
                   ]),
                 ),

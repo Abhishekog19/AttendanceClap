@@ -397,7 +397,7 @@ class _SubjectSheetState extends State<_SubjectSheet> {
               children: [
                 Expanded(
                   child: SliderTheme(
-                    data: SliderThemeData(
+                    data: const SliderThemeData(
                       activeTrackColor: OnboardingColors.primary,
                       inactiveTrackColor: OnboardingColors.progressBg,
                       thumbColor: OnboardingColors.primary,

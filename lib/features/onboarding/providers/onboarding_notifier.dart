@@ -71,7 +71,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   ) async {
     await advanceStep(currentStep);
     final nextRoute =
-        OnboardingStep.routeFor(state.currentStep ?? OnboardingStep.welcome);
+        OnboardingStep.routeFor(state.currentStep);
     if (context.mounted) GoRouter.of(context).go(nextRoute);
   }
 
