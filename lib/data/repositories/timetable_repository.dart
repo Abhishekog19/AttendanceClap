@@ -399,23 +399,23 @@ class TimetableRepository {
   /// Safe to call post-onboarding: only future unmarked sessions are wiped,
   /// so past attendance marks are preserved.
   ///
-  /// Returns the number of sessions written, or 0 if no semester/lectures found.
+  /// New sessions are written first; old future-unmarked sessions are deleted
+  /// only after all writes succeed. This prevents data loss if a write batch
+  /// fails mid-way.
+  ///
+  /// Returns the number of sessions written, or 0 if no semester found.
   Future<int> regenerateFutureSessionsFromLectures({
     required List<LectureBlock> lectures,
   }) async {
     final semester = await getActiveSemester();
-    if (semester == null || lectures.isEmpty) return 0;
-
+    if (semester == null) return 0;
     final startOfToday = DateTime(
       DateTime.now().year,
       DateTime.now().month,
       DateTime.now().day,
     );
 
-    // Wipe only future unmarked sessions
-    await deleteFutureUnmarkedSessions();
-
-    // Re-generate sessions from today → semester end
+    // Build new session list first (no side-effects yet)
     final sessions = <ClassSession>[];
     for (final lecture in lectures) {
       final weekday = kDayOrder.indexOf(lecture.day) + 1;
@@ -441,6 +441,7 @@ class TimetableRepository {
       }
     }
 
+    // Write new sessions first — if this throws the old data is untouched.
     const chunkSize = 500;
     for (int i = 0; i < sessions.length; i += chunkSize) {
       final chunk = sessions.skip(i).take(chunkSize).toList();
@@ -450,6 +451,9 @@ class TimetableRepository {
       }
       await batch.commit();
     }
+
+    // Only after all writes succeed, remove stale future unmarked sessions.
+    await deleteFutureUnmarkedSessions();
 
     return sessions.length;
   }

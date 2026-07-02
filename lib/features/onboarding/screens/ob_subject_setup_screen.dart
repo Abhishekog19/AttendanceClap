@@ -81,7 +81,8 @@ class ObSubjectSetupScreen extends ConsumerWidget {
         onPressed: () async {
           final ok = await notifier.completeSubjectSetup();
           if (ok && context.mounted) {
-            notifier.navigateNext(context, OnboardingStep.subjects);
+            final nextStep = ref.read(onboardingNotifierProvider).currentStep;
+            context.go(OnboardingStep.routeFor(nextStep));
           }
         },
       ),

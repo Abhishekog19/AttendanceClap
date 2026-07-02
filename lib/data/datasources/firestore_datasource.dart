@@ -399,6 +399,7 @@ class FirestoreDatasource {
   Future<void> deleteAllTimetableData(String uid) async {
     // Clear flat collections
     final collections = [
+      _userDoc(uid).collection('timetable_entries'),
       _userDoc(uid).collection('class_sessions'),
       _userDoc(uid).collection('subjects'),
       _userDoc(uid).collection('attendance_logs'),
@@ -414,7 +415,6 @@ class FirestoreDatasource {
           .doc('config')
           .collection('lectures'),
     );
-  }
 
   Future<void> _deleteCollection(
       CollectionReference<Map<String, dynamic>> col) async {
@@ -431,15 +431,20 @@ class FirestoreDatasource {
     } while (snap.docs.length == batchSize);
   }
 
-  /// Returns true if the user has any lectures saved in timetable/config/lectures.
+   /// Returns true if the user has any lectures saved in timetable/config/lectures.
   Future<bool> hasActiveTimetable(String uid) async {
-    final snap = await _userDoc(uid)
+    final lecturesSnap = await _userDoc(uid)
         .collection('timetable')
         .doc('config')
         .collection('lectures')
         .limit(1)
         .get();
-    return snap.docs.isNotEmpty;
+    if (lecturesSnap.docs.isNotEmpty) return true;
+    final legacySnap = await _userDoc(uid)
+        .collection('timetable_entries')
+        .limit(1)
+        .get();
+    return legacySnap.docs.isNotEmpty;
   }
 
   // ─── Counter delta helper ─────────────────────────────────────────────────────

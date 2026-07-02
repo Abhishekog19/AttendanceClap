@@ -41,8 +41,12 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     final profile = await ref.read(currentUserProfileProvider.future);
     if (profile == null || profile.onboardingComplete) return;
 
+    final completedStep = profile.onboardingStep;
+    final resumeStep = completedStep == null
+        ? OnboardingStep.welcome
+        : OnboardingStep.nextStep(completedStep) ?? completedStep;
     await restoreFromFirestore(
-      lastStep: profile.onboardingStep ?? OnboardingStep.welcome,
+      lastStep: resumeStep,
       collegeName: profile.collegeName,
       courseName: profile.courseName,
       semesterName: profile.semesterName,

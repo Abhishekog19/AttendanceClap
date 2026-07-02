@@ -122,13 +122,15 @@ class ObReviewScreen extends ConsumerWidget {
                 context.go(OnboardingStep.routeFor(OnboardingStep.timetable)),
             children: [
               lecturesAsync.when(
-                data: (lectures) => lectures.isEmpty
-                    ? _EmptyChip(state.timetableSkipped ? 'Skipped' : 'Empty')
-                    : _ReviewRow(
-                        'Classes/week', '${lectures.length} slots'),
+                data: (lectures) => state.timetableSkipped
+                    ? const _EmptyChip('Skipped')
+                    : lectures.isEmpty
+                        ? const _EmptyChip('Empty')
+                        : _ReviewRow(
+                            'Classes/week', '${lectures.length} slots'),
                 loading: () => const LinearProgressIndicator(),
                 error: (_, __) => const _EmptyChip('Error loading'),
-              ),
+              ),  
             ],
           ),
 

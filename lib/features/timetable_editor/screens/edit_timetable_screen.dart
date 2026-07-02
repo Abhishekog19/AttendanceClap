@@ -345,6 +345,31 @@ class _CustomizeSheetState extends ConsumerState<_CustomizeSheet> {
               onPressed: () {
                 final notifier =
                     ref.read(timetableEditorNotifierProvider.notifier);
+
+                // Validate that no saved lecture falls outside the new range.
+                final lectures =
+                    ref.read(timetableEditorNotifierProvider).data.lectures;
+                final outsideBounds = lectures.where((l) {
+                  final startMins = l.startHour * 60 + l.startMinute;
+                  final endMins = startMins + l.durationMinutes;
+                  return startMins < _startHour * 60 ||
+                      endMins > _endHour * 60;
+                }).toList();
+
+                if (outsideBounds.isNotEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        '${outsideBounds.length} lecture${outsideBounds.length == 1 ? '' : 's'} '
+                        'fall outside the new hour range. '
+                        'Adjust or remove them first.',
+                      ),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  return;
+                }
+
                 notifier.updateDefaultLectureDuration(_duration);
                 notifier.updateGridHourRange(_startHour, _endHour);
                 Navigator.of(context).pop();

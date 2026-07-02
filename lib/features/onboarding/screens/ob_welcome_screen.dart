@@ -52,10 +52,11 @@ class ObWelcomeScreen extends ConsumerWidget {
               // ── Primary CTA ───────────────────────────────────────────
               OnboardingCTAButton(
                 label: 'Get Started',
-                onPressed: () => ref
+                onPressed: () async {
+                  await ref
                     .read(onboardingNotifierProvider.notifier)
-                    .navigateNext(context, OnboardingStep.welcome),
-              ),
+                    .navigateNext(context, OnboardingStep.welcome);
+                },
               const SizedBox(height: 12),
               // ── Sign Out ──────────────────────────────────────────────
               // User is always logged in at this point (router gate ensures it).

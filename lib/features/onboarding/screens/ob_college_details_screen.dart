@@ -161,7 +161,7 @@ class _ObCollegeDetailsScreenState
         onPressed: () async {
           final ok = await notifier.saveCollegeDetails();
           if (ok && context.mounted) {
-            notifier.navigateNext(context, OnboardingStep.college);
+            await notifier.navigateNext(context, OnboardingStep.college);
           }
         },
       ),

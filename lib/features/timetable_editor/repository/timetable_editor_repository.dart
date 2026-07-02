@@ -43,36 +43,51 @@ class TimetableEditorRepository {
   })  : _firestore = firestore,
         _auth = auth;
 
-  String get _uid => _auth.currentUser!.uid;
+  /// Returns the current user's UID, or null when unauthenticated.
+  String? get _uidOrNull => _auth.currentUser?.uid;
 
   // ── Collection / Document references ────────────────────────────────────────
 
-  DocumentReference<Map<String, dynamic>> get _configDoc => _firestore
-      .collection('users')
-      .doc(_uid)
-      .collection('timetable')
-      .doc('config');
+  DocumentReference<Map<String, dynamic>>? get _configDoc {
+    final uid = _uidOrNull;
+    if (uid == null) return null;
+    return _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('timetable')
+        .doc('config');
+  }
 
-  CollectionReference<Map<String, dynamic>> get _lecturesCol => _firestore
-      .collection('users')
-      .doc(_uid)
-      .collection('timetable')
-      .doc('config')
-      .collection('lectures');
+  CollectionReference<Map<String, dynamic>>? get _lecturesCol {
+    final uid = _uidOrNull;
+    if (uid == null) return null;
+    return _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('timetable')
+        .doc('config')
+        .collection('lectures');
+  }
 
   // ── Config (grid settings) ────────────────────────────────────────────────
 
   /// Stream of the config doc — delivers grid settings.
+  /// Returns an empty stream when no user is authenticated.
   Stream<Map<String, dynamic>> watchConfig() {
-    return _configDoc.snapshots().map((snap) => snap.data() ?? {});
+    final doc = _configDoc;
+    if (doc == null) return const Stream.empty();
+    return doc.snapshots().map((snap) => snap.data() ?? {});
   }
 
   /// Saves grid configuration to the config doc.
+  /// No-ops when no user is authenticated.
   Future<void> saveGridConfig({
     int? defaultLectureDurationMinutes,
     int? gridStartHour,
     int? gridEndHour,
   }) {
+    final doc = _configDoc;
+    if (doc == null) return Future.value();
     final data = <String, dynamic>{};
     if (defaultLectureDurationMinutes != null) {
       data['defaultLectureDurationMinutes'] = defaultLectureDurationMinutes;
@@ -80,33 +95,45 @@ class TimetableEditorRepository {
     if (gridStartHour != null) data['gridStartHour'] = gridStartHour;
     if (gridEndHour != null) data['gridEndHour'] = gridEndHour;
     if (data.isEmpty) return Future.value();
-    return _configDoc.set(data, SetOptions(merge: true));
+    return doc.set(data, SetOptions(merge: true));
   }
 
   // ── Lectures ─────────────────────────────────────────────────────────────────
 
   /// Real-time stream of all lectures.
+  /// Returns an empty stream when no user is authenticated.
   Stream<List<LectureBlock>> watchLectures() {
-    return _lecturesCol.snapshots().map((snap) => snap.docs
+    final col = _lecturesCol;
+    if (col == null) return const Stream.empty();
+    return col.snapshots().map((snap) => snap.docs
         .map((d) => LectureBlock.fromMap(d.id, d.data()))
         .toList());
   }
 
   /// Adds a new lecture. Returns the generated doc ID.
+  /// No-ops (returns empty string) when no user is authenticated.
   Future<String> addLecture(LectureBlock lecture) async {
+    final col = _lecturesCol;
+    if (col == null) return '';
     final id = lecture.id.isEmpty ? _uuid.v4() : lecture.id;
-    await _lecturesCol.doc(id).set(lecture.toMap());
+    await col.doc(id).set(lecture.toMap());
     return id;
   }
 
   /// Updates an existing lecture.
+  /// No-ops when no user is authenticated.
   Future<void> updateLecture(LectureBlock lecture) {
-    return _lecturesCol.doc(lecture.id).set(lecture.toMap());
+    final col = _lecturesCol;
+    if (col == null) return Future.value();
+    return col.doc(lecture.id).set(lecture.toMap());
   }
 
   /// Deletes a lecture by ID.
+  /// No-ops when no user is authenticated.
   Future<void> deleteLecture(String id) {
-    return _lecturesCol.doc(id).delete();
+    final col = _lecturesCol;
+    if (col == null) return Future.value();
+    return col.doc(id).delete();
   }
 
   /// Generates a fresh UUID — useful for pre-assigning IDs before writes.

@@ -87,6 +87,11 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
       conflicts: {},
     );
 
+    // Watch the repo provider so the notifier is torn down and rebuilt
+    // whenever the authenticated user changes (auth switch, logout, login).
+    // onDispose below cancels the old subscriptions automatically.
+    ref.watch(timetableEditorRepositoryProvider);
+
     // Wire stream listeners after first build
     Future.microtask(_wireListeners);
 
@@ -193,11 +198,11 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
   // ── Place lecture ─────────────────────────────────────────────────────────────
 
   /// Places the currently selected subject at an exact [startTime] ("HH:mm")
-  /// for a given [day]. Silently no-ops if no subject is selected or the
-  /// new block would overlap an existing block.
-  Future<void> placeLectureAt(String day, String startTime) async {
+  /// for a given [day]. Returns false if no subject is selected or the
+  /// new block would overlap an existing block (so callers can give feedback).
+  Future<bool> placeLectureAt(String day, String startTime) async {
     final subjectId = state.ui.selectedSubjectId;
-    if (subjectId == null) return;
+    if (subjectId == null) return false;
 
     final id = _uuid.v4();
     final lecture = LectureBlock(
@@ -216,7 +221,7 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
       final lEnd   = lStart + l.durationMinutes;
       return newStart < lEnd && lStart < newEnd;
     });
-    if (overlaps) return;
+    if (overlaps) return false;
 
     // Optimistic local update
     _updateData(state.data.copyWith(
@@ -228,11 +233,12 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
 
     // Debounced session regeneration
     _scheduleRegen();
+    return true;
   }
 
   /// Legacy method retained for compatibility — places at whole-hour boundary.
   @Deprecated('Use placeLectureAt(day, startTime) instead')
-  Future<void> placeLecture(String day, int hour) =>
+  Future<bool> placeLecture(String day, int hour) =>
       placeLectureAt(day, '${hour.toString().padLeft(2, '0')}:00');
 
   // ── Delete lecture ─────────────────────────────────────────────────────────────
@@ -317,13 +323,10 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
 
   Future<void> _doRegen() async {
     final lectures = state.data.lectures;
-    if (lectures.isEmpty) return;
-    try {
-      await ref.read(timetableRepositoryProvider)
-          .regenerateFutureSessionsFromLectures(lectures: lectures);
-    } catch (_) {
-      // Best-effort — don't surface errors to the user
-    }
+    // Always run regeneration (even for empty lectures list) so stale future
+    // sessions are cleaned up when all lectures are removed.
+    await ref.read(timetableRepositoryProvider)
+        .regenerateFutureSessionsFromLectures(lectures: lectures);
   }
 
   /// Cancels any pending debounce and immediately runs regeneration.

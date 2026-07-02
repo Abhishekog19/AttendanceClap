@@ -278,7 +278,12 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
         '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
 
     HapticFeedback.lightImpact();
-    notifier.placeLectureAt(day, startTime);
+    notifier.placeLectureAt(day, startTime).then((placed) {
+      if (!placed) {
+        // Slot is occupied — give a distinct haptic so the user knows
+        HapticFeedback.mediumImpact();
+      }
+    });
   }
 
   void _onBlockTap(LectureBlock lecture) {

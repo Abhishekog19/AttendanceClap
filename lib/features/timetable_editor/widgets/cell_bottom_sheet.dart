@@ -210,32 +210,35 @@ class _DetailSheetState extends State<_DetailSheet> {
   String get _endTime {
     final parts = _startTime.split(':');
     final startMins = int.parse(parts[0]) * 60 + int.parse(parts[1]);
-    final endMins = startMins + _durationMinutes;
+    final endMins = (startMins + _durationMinutes) % (24 * 60);
     return '${(endMins ~/ 60).toString().padLeft(2, '0')}:${(endMins % 60).toString().padLeft(2, '0')}';
   }
-
   Future<void> _save() async {
     setState(() => _saving = true);
-    // Save lecture details
-    await widget.ref
-        .read(timetableEditorNotifierProvider.notifier)
-        .updateLectureDetails(
-          widget.lecture.id,
-          startTime: _startTime,
-          durationMinutes: _durationMinutes,
-          notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-        );
-    // Save color change if subject exists and color changed
-    final subject = widget.subject;
-    if (subject != null &&
-        _selectedColor != null &&
-        _selectedColor != subject.colorHex) {
-      final updated = subject.copyWith(colorHex: _selectedColor);
+    try {
+      // Save lecture details
       await widget.ref
-          .read(subjectRepositoryProvider)
-          .updateSubject(updated);
+          .read(timetableEditorNotifierProvider.notifier)
+          .updateLectureDetails(
+            widget.lecture.id,
+            startTime: _startTime,
+            durationMinutes: _durationMinutes,
+            notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+          );
+      // Save color change if subject exists and color changed
+      final subject = widget.subject;
+      if (subject != null &&
+          _selectedColor != null &&
+          _selectedColor != subject.colorHex) {
+        final updated = subject.copyWith(colorHex: _selectedColor);
+        await widget.ref
+            .read(subjectRepositoryProvider)
+            .updateSubject(updated);
+      }
+      if (mounted) Navigator.of(context).pop();
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
-    if (mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -260,235 +263,189 @@ class _DetailSheetState extends State<_DetailSheet> {
         ),
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Handle
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 20),
-                  decoration: BoxDecoration(
-                    color: border,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              Text(
-                name,
-                style: GoogleFonts.inter(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: onSurface,
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // Start time picker
-              _DetailRow(
-                label: 'Start',
-                dark: isDark,
-                secondary: secondary,
-                border: border,
-                child: GestureDetector(
-                  onTap: _pickStartTime,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Handle
+                Center(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 20),
                     decoration: BoxDecoration(
-                      border: Border.all(color: border),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      _startTime,
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: onSurface,
-                      ),
+                      color: border,
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-
-              // Duration stepper
-              _DetailRow(
-                label: 'Duration',
-                dark: isDark,
-                secondary: secondary,
-                border: border,
-                child: Row(
-                  children: [
-                    _StepButton(
-                      icon: Icons.remove,
-                      onTap: () {
-                        if (_durationMinutes > 15) {
-                          setState(() => _durationMinutes -= 15);
-                        }
-                      },
-                      dark: isDark,
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                Text(
+                  name,
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: onSurface,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                // Start time picker
+                _DetailRow(
+                  label: 'Start',
+                  dark: isDark,
+                  secondary: secondary,
+                  border: border,
+                  child: GestureDetector(
+                    onTap: _pickStartTime,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: border),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       child: Text(
-                        '$_durationMinutes min',
+                        _startTime,
                         style: GoogleFonts.inter(
-                          fontSize: 14,
+                          fontSize: 15,
                           fontWeight: FontWeight.w600,
                           color: onSurface,
                         ),
                       ),
                     ),
-                    _StepButton(
-                      icon: Icons.add,
-                      onTap: () {
-                        if (_durationMinutes < 300) {
-                          setState(() => _durationMinutes += 15);
-                        }
-                      },
-                      dark: isDark,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Duration stepper
+                _DetailRow(
+                  label: 'Duration',
+                  dark: isDark,
+                  secondary: secondary,
+                  border: border,
+                  child: Row(
+                    children: [
+                      _StepButton(
+                        icon: Icons.remove,
+                        onTap: () {
+                          if (_durationMinutes > 15) {
+                            setState(() => _durationMinutes -= 15);
+                          }
+                        },
+                        dark: isDark,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text(
+                          '$_durationMinutes min',
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: onSurface,
+                          ),
+                        ),
+                      ),
+                      _StepButton(
+                        icon: Icons.add,
+                        onTap: () {
+                          if (_durationMinutes < 300) {
+                            setState(() => _durationMinutes += 15);
+                          }
+                        },
+                        dark: isDark,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '→ $_endTime',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: secondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Notes
+                TextField(
+                  controller: _notesCtrl,
+                  style: GoogleFonts.inter(fontSize: 14, color: onSurface),
+                  decoration: InputDecoration(
+                    hintText: 'Notes (optional)',
+                    hintStyle: GoogleFonts.inter(color: secondary),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: border),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '→ $_endTime',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: secondary,
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: primary),
+                    ),
+                    filled: true,
+                    fillColor: isDark
+                        ? const Color(0xFF111318)
+                        : const Color(0xFFF7F7FB),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                // Save / Delete buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          widget.ref
+                              .read(timetableEditorNotifierProvider.notifier)
+                              .deleteLecture(widget.lecture.id);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.red.shade400,
+                          side: BorderSide(color: Colors.red.shade200),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text('Delete'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        onPressed: _saving ? null : _save,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 0,
+                        ),
+                        child: _saving
+                            ? const SizedBox(
+                                height: 16,
+                                width: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(
+                                'Save Changes',
+                                style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                       ),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 12),
-
-              // Color picker
-              if (widget.subject != null) ...[
-                Text(
-                  'Color',
-                  style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: secondary,
-                      fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: kSubjectColorPalette.map((hex) {
-                    final c = hexToColor(hex);
-                    final sel = (_selectedColor ?? widget.subject!.effectiveColorHex) == hex;
-                    return GestureDetector(
-                      onTap: () => setState(() => _selectedColor = hex),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 100),
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: c,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: sel ? Colors.white : Colors.transparent,
-                            width: 2,
-                          ),
-                          boxShadow: sel
-                              ? [BoxShadow(color: c.withValues(alpha: 0.6), blurRadius: 5)]
-                              : null,
-                        ),
-                        child: sel
-                            ? const Icon(Icons.check_rounded,
-                                size: 14, color: Colors.white)
-                            : null,
-                      ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 12),
               ],
-
-              // Notes
-              TextField(
-                controller: _notesCtrl,
-                style: GoogleFonts.inter(fontSize: 14, color: onSurface),
-                decoration: InputDecoration(
-                  hintText: 'Notes (optional)',
-                  hintStyle: GoogleFonts.inter(color: secondary),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: primary),
-                  ),
-                  filled: true,
-                  fillColor: isDark
-                      ? const Color(0xFF111318)
-                      : const Color(0xFFF7F7FB),
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // Save / Delete buttons
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        widget.ref
-                            .read(timetableEditorNotifierProvider.notifier)
-                            .deleteLecture(widget.lecture.id);
-                      },
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.red.shade400,
-                        side: BorderSide(color: Colors.red.shade200),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('Delete'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      onPressed: _saving ? null : _save,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: _saving
-                          ? const SizedBox(
-                              height: 16,
-                              width: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : Text(
-                              'Save Changes',
-                              style: GoogleFonts.inter(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
         ),
       ),

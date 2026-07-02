@@ -53,7 +53,7 @@ class ObTimetableGridScreen extends ConsumerWidget {
                   const Spacer(),
                   // Skip button
                   TextButton(
-                    onPressed: () async {
+                    onPressed: state.isLoading ? null : () async {
                       await notifier.skipTimetable();
                       if (context.mounted) {
                         notifier.navigateNext(
@@ -108,9 +108,13 @@ class ObTimetableGridScreen extends ConsumerWidget {
             ),
 
             // ── Timetable grid (takes all remaining space) ───────────────
-            const Expanded(
+            Expanded(
               child: TimetableGrid(
                 mode: TimetableGridMode.onboarding,
+                onAddSubjectTap: () => notifier.navigateBack(
+                  context,
+                  OnboardingStep.subjects,
+                ),
               ),
             ),
 

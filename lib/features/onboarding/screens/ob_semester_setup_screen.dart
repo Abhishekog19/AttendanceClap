@@ -219,7 +219,8 @@ class _ObSemesterSetupScreenState
         onPressed: () async {
           final ok = await notifier.saveSemester();
           if (ok && context.mounted) {
-            notifier.navigateNext(context, OnboardingStep.semester);
+            final nextStep = ref.read(onboardingNotifierProvider).currentStep;
+            context.go(OnboardingStep.routeFor(nextStep));
           }
         },
       ),

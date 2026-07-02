@@ -96,8 +96,8 @@ class LectureBlock {
     final durationMinutes = (m['durationMinutes'] as num?)?.toInt() ?? 50;
     return LectureBlock(
       id: id,
-      day: m['day'] as String,
-      subjectId: m['subjectId'] as String,
+      day: m['day'] as String? ?? 'MON',
+      subjectId: m['subjectId'] as String? ?? '',
       startTime: startTime,
       durationMinutes: durationMinutes,
       facultyName: m['facultyName'] as String?,
