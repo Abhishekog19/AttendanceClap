@@ -200,7 +200,7 @@ class _TimetableReviewScreenState
                 ),
                 if (hasLowConf) ...[
                   const SizedBox(width: AppSpacing.sm),
-                  _StatChip(
+                  const _StatChip(
                     label: 'Low confidence',
                     icon: Icons.warning_amber_outlined,
                     color: Colors.amber,
@@ -418,10 +418,10 @@ class _EntryCard extends StatelessWidget {
                       Row(
                         children: [
                           if (entry.isLowConfidence)
-                            Padding(
+                            const Padding(
                               padding:
-                                  const EdgeInsets.only(right: AppSpacing.xs),
-                              child: const Icon(Icons.warning_amber,
+                                  EdgeInsets.only(right: AppSpacing.xs),
+                              child: Icon(Icons.warning_amber,
                                   color: Colors.amber, size: 14),
                             ),
                           Expanded(
@@ -583,7 +583,7 @@ class _EntryEditSheetState extends State<_EntryEditSheet> {
 
           // Day selector
           DropdownButtonFormField<String>(
-            value: _selectedDay,
+            initialValue: _selectedDay,
             decoration: const InputDecoration(
               labelText: 'Day *',
               prefixIcon: Icon(Icons.calendar_today_outlined),

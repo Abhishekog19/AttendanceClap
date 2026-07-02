@@ -202,8 +202,10 @@ class _EditTodayScheduleSheetState
                 (s) => RadioListTile<String>(
                   title: Text(s.name),
                   value: s.id,
+                  // ignore: deprecated_member_use
                   groupValue: selectedId,
                   dense: true,
+                  // ignore: deprecated_member_use
                   onChanged: (v) => setS(() {
                     selectedId = v;
                     selectedName = s.name;
@@ -242,7 +244,8 @@ class _EditTodayScheduleSheetState
       );
       await ref.read(scheduleNotifierProvider.notifier).saveOverride(override);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context) // ignore: use_build_context_synchronously
+            .showSnackBar(
           SnackBar(
             content: Text('Subject changed to $selectedName for today'),
             behavior: SnackBarBehavior.floating,
@@ -346,7 +349,8 @@ class _EditTodayScheduleSheetState
       );
       await ref.read(scheduleNotifierProvider.notifier).saveOverride(override);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context) // ignore: use_build_context_synchronously
+            .showSnackBar(
           SnackBar(
             content: Text(
                 '${session.displaySubjectName} rescheduled to '
@@ -382,7 +386,7 @@ class _EditTodayScheduleSheetState
                         fontSize: 12, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 4),
                 DropdownButtonFormField<String>(
-                  value: selectedId,
+                  initialValue: selectedId,
                   hint: const Text('Select subject'),
                   onChanged: (v) {
                     setS(() {
@@ -483,7 +487,8 @@ class _EditTodayScheduleSheetState
       );
       await ref.read(scheduleNotifierProvider.notifier).saveOverride(override);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context) // ignore: use_build_context_synchronously
+            .showSnackBar(
           SnackBar(
             content: Text(
                 'Extra period added: $selectedName '
@@ -654,13 +659,13 @@ class _SessionEditTile extends StatelessWidget {
                     const Text('Reschedule Time'),
                   ]),
                 ),
-                PopupMenuItem(
+                const PopupMenuItem(
                   value: 'cancel',
                   child: Row(children: [
-                    const Icon(Icons.block,
+                    Icon(Icons.block,
                         size: 16, color: AppColors.error),
-                    const SizedBox(width: 8),
-                    const Text('Cancel Period',
+                    SizedBox(width: 8),
+                    Text('Cancel Period',
                         style: TextStyle(color: AppColors.error)),
                   ]),
                 ),

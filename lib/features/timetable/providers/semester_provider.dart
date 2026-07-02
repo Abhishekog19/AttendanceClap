@@ -145,7 +145,7 @@ class SemesterNotifier extends _$SemesterNotifier {
       await repo.deleteAllSessions();
 
       // 5. Generate and write all sessions
-      final count = await repo.saveClassSessions(
+      final count = await repo.saveClassSessionsFromEntries(
         entries: effectiveEntries,
         semester: semester,
         subjectIdMap: subjectIdMap,

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../data/repositories/auth_repository.dart';
+import '../providers/onboarding_notifier.dart';
 import '../providers/onboarding_state.dart';
 import '../widgets/onboarding_colors.dart';
 import '../widgets/onboarding_scaffold.dart';
@@ -52,11 +52,11 @@ class ObWelcomeScreen extends ConsumerWidget {
               // ── Primary CTA ───────────────────────────────────────────
               OnboardingCTAButton(
                 label: 'Get Started',
-                // Navigate directly — no Firestore write needed on welcome.
-                // The step key is saved when the user advances from College Details.
-                onPressed: () =>
-                    context.go(OnboardingStep.routeFor(OnboardingStep.college)),
-              ),
+                onPressed: () async {
+                  await ref
+                    .read(onboardingNotifierProvider.notifier)
+                    .navigateNext(context, OnboardingStep.welcome);
+                },
               const SizedBox(height: 12),
               // ── Sign Out ──────────────────────────────────────────────
               // User is always logged in at this point (router gate ensures it).

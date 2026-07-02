@@ -1,11 +1,13 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../data/datasources/firestore_datasource.dart';
 import '../../../data/models/subject_model.dart';
-import '../../../data/models/timetable_entry_model.dart';
 import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/timetable_repository.dart';
+import '../../../features/timetable_editor/providers/timetable_editor_notifier.dart';
 import '../repositories/onboarding_repository.dart';
 import 'onboarding_state.dart';
 
@@ -28,7 +30,28 @@ OnboardingRepository onboardingRepository(Ref ref) {
 @riverpod
 class OnboardingNotifier extends _$OnboardingNotifier {
   @override
-  OnboardingState build() => const OnboardingState();
+  OnboardingState build() {
+    // Auto-restore when user profile is loaded and onboarding is incomplete.
+    // This runs once per provider lifecycle (cold start / login).
+    Future.microtask(_hydrateIfNeeded);
+    return const OnboardingState();
+  }
+
+  Future<void> _hydrateIfNeeded() async {
+    final profile = await ref.read(currentUserProfileProvider.future);
+    if (profile == null || profile.onboardingComplete) return;
+
+    final completedStep = profile.onboardingStep;
+    final resumeStep = completedStep == null
+        ? OnboardingStep.welcome
+        : OnboardingStep.nextStep(completedStep) ?? completedStep;
+    await restoreFromFirestore(
+      lastStep: resumeStep,
+      collegeName: profile.collegeName,
+      courseName: profile.courseName,
+      semesterName: profile.semesterName,
+    );
+  }
 
   OnboardingRepository get _repo => ref.read(onboardingRepositoryProvider);
 
@@ -41,6 +64,26 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     final next = OnboardingStep.nextStep(completedStep);
     state = state.copyWith(currentStep: next ?? completedStep, error: null);
     await _repo.saveStep(completedStep);
+  }
+
+  /// Navigates to the next step in the flow from [currentStep].
+  /// Also persists [currentStep] as completed to Firestore.
+  /// Must be called with a mounted [BuildContext].
+  Future<void> navigateNext(
+    BuildContext context,
+    String currentStep,
+  ) async {
+    await advanceStep(currentStep);
+    final nextRoute =
+        OnboardingStep.routeFor(state.currentStep);
+    if (context.mounted) GoRouter.of(context).go(nextRoute);
+  }
+
+  /// Navigates back to [targetStep] without persisting any progress change.
+  void navigateBack(BuildContext context, String targetStep) {
+    if (context.mounted) {
+      GoRouter.of(context).go(OnboardingStep.routeFor(targetStep));
+    }
   }
 
   // ─── College Details ──────────────────────────────────────────────────────
@@ -114,6 +157,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     required String name,
     String? faculty,
     double? attendanceTarget,
+    String? colorHex,
   }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
@@ -121,6 +165,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
         name: name.trim(),
         faculty: faculty?.trim(),
         attendanceTarget: attendanceTarget,
+        colorHex: colorHex,
       );
       final subject = SubjectModel(
         id: id,
@@ -131,6 +176,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
         attendanceTarget: attendanceTarget,
+        colorHex: colorHex,
       );
       state = state.copyWith(
         subjects: [...state.subjects, subject],
@@ -146,6 +192,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     required String name,
     String? faculty,
     double? attendanceTarget,
+    String? colorHex,
   }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
@@ -157,6 +204,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
         existingId: subjectId,
         attendedClasses: existing.attendedClasses,
         totalClasses: existing.totalClasses,
+        colorHex: colorHex ?? existing.colorHex,
       );
       final updated = state.subjects.map((s) {
         if (s.id == subjectId) {
@@ -164,6 +212,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
             name: name.trim(),
             faculty: faculty?.trim(),
             attendanceTarget: attendanceTarget,
+            colorHex: colorHex ?? existing.colorHex,
           );
         }
         return s;
@@ -190,53 +239,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     return true;
   }
 
-  // ─── Timetable Builder ────────────────────────────────────────────────────
-
-  Future<void> addTimetableEntry({
-    required String subjectId,
-    required String subjectName,
-    required String day,
-    required String startTime,
-    required String endTime,
-    String? faculty,
-    String? room,
-  }) async {
-    try {
-      final id = await _repo.addTimetableEntry(
-        subjectId: subjectId,
-        subjectName: subjectName,
-        day: day,
-        startTime: startTime,
-        endTime: endTime,
-        faculty: faculty,
-        room: room,
-      );
-      final entry = TimetableEntry(
-        id: id,
-        subjectId: subjectId,
-        subject: subjectName,
-        day: day,
-        startTime: startTime,
-        endTime: endTime,
-        confidence: 1.0,
-      );
-      state = state.copyWith(
-          timetableEntries: [...state.timetableEntries, entry]);
-    } catch (e) {
-      state = state.copyWith(error: e.toString());
-    }
-  }
-
-  Future<void> removeTimetableEntry(String entryId) async {
-    await _repo.deleteTimetableEntry(entryId);
-    state = state.copyWith(
-      timetableEntries:
-          state.timetableEntries.where((e) => e.id != entryId).toList(),
-    );
-  }
-
-  void syncTimetableEntries(List<TimetableEntry> entries) =>
-      state = state.copyWith(timetableEntries: entries);
+  // ─── Timetable Builder ────────────────────────────────────────────────
 
   Future<void> skipTimetable() async {
     state = state.copyWith(timetableSkipped: true);
@@ -246,6 +249,13 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   Future<void> completeTimetable() async {
     state = state.copyWith(timetableSkipped: false);
     await advanceStep(OnboardingStep.timetable);
+  }
+
+  /// Sets the default lecture duration (in minutes) and saves to timetable/config.
+  Future<void> setDefaultLectureDuration(int minutes) async {
+    await ref
+        .read(timetableEditorNotifierProvider.notifier)
+        .updateDefaultLectureDuration(minutes);
   }
 
   // ─── Holiday Calendar ─────────────────────────────────────────────────────
@@ -369,9 +379,10 @@ class OnboardingNotifier extends _$OnboardingNotifier {
         await _repo.saveManualCounts(manualCounts);
       }
       if (absentBySubject.isNotEmpty) {
+        // timetable entries are now read from timetable/config/lectures
+        // by the repository directly
         await _repo.saveAbsentDates(
           absentDatesBySubject: absentBySubject,
-          timetableEntries: state.timetableEntries,
           subjectIdToName: subjectIdToName,
         );
       }
@@ -390,7 +401,8 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   Future<bool> confirmAndComplete() async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      if (!state.timetableSkipped && state.timetableEntries.isNotEmpty) {
+      // Generate class sessions from timetable/config/lectures (new system)
+      if (!state.timetableSkipped) {
         await _repo.generateClassSessions();
       }
       await _repo.markComplete();

@@ -26,7 +26,7 @@ final onboardingRepositoryProvider =
 // ignore: unused_element
 typedef OnboardingRepositoryRef = AutoDisposeProviderRef<OnboardingRepository>;
 String _$onboardingNotifierHash() =>
-    r'a67a8635072f5a297e1bf130c88f48390fa5c445';
+    r'e4b3ebedd934900e5fbbde46ea7d9259bcc376a5';
 
 /// See also [OnboardingNotifier].
 @ProviderFor(OnboardingNotifier)

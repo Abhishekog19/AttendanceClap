@@ -139,11 +139,11 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       children: [
         Container(
           width: 80, height: 80,
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             color: AppColors.successContainer,
             shape: BoxShape.circle,
           ),
-          child: Icon(Icons.mark_email_read_outlined, color: AppColors.success, size: 40),
+          child: const Icon(Icons.mark_email_read_outlined, color: AppColors.success, size: 40),
         ),
         const SizedBox(height: AppSpacing.lg),
         Text('Check Your Email', style: AppTextStyles.headlineMd),

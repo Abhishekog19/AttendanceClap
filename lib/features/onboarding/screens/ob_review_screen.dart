@@ -4,17 +4,17 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
-import '../../../data/models/timetable_entry_model.dart';
-import '../../../data/repositories/timetable_repository.dart';
+import '../../../features/timetable_editor/models/timetable_editor_models.dart';
+import '../../../features/timetable_editor/repository/timetable_editor_repository.dart';
 import '../providers/onboarding_notifier.dart';
 import '../providers/onboarding_state.dart';
 import '../widgets/onboarding_colors.dart';
 import '../widgets/onboarding_scaffold.dart';
 
 // Module-level provider so it can be watched reactively from build().
-final _timetableEntriesProvider =
-    StreamProvider.autoDispose<List<TimetableEntry>>((ref) {
-  return ref.watch(timetableRepositoryProvider).watchTimetableEntries();
+final _lecturesProvider =
+    StreamProvider.autoDispose<List<LectureBlock>>((ref) {
+  return ref.watch(timetableEditorRepositoryProvider).watchLectures();
 });
 
 class ObReviewScreen extends ConsumerWidget {
@@ -25,8 +25,8 @@ class ObReviewScreen extends ConsumerWidget {
     final state = ref.watch(onboardingNotifierProvider);
     final notifier = ref.read(onboardingNotifierProvider.notifier);
 
-    // Read timetable entries from Firestore for the review cards
-    final timetableAsync = ref.watch(_timetableEntriesProvider);
+    // Read lecture blocks from the new canonical source
+    final lecturesAsync = ref.watch(_lecturesProvider);
 
     final fmt = DateFormat('d MMM yyyy');
 
@@ -74,7 +74,7 @@ class ObReviewScreen extends ConsumerWidget {
               if (state.section.isNotEmpty)
                 _ReviewRow('Section', state.section),
               if (state.collegeName.isEmpty && state.courseName.isEmpty)
-                _EmptyChip('Not set'),
+                const _EmptyChip('Not set'),
             ],
           ),
           const SizedBox(height: 12),
@@ -106,7 +106,7 @@ class ObReviewScreen extends ConsumerWidget {
             onEdit: () =>
                 context.go(OnboardingStep.routeFor(OnboardingStep.subjects)),
             children: state.subjects.isEmpty
-                ? [_EmptyChip('None added')]
+                ? [const _EmptyChip('None added')]
                 : state.subjects
                     .map((s) => _ReviewRow(s.name,
                         '${(s.attendanceTarget ?? state.attendanceGoal).round()}%'))
@@ -114,21 +114,23 @@ class ObReviewScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
 
-          // ── Timetable card ───────────────────────────────────────
+          // ── Timetable card ──────────────────────────────────────────────────
           _ReviewCard(
             icon: Icons.schedule_rounded,
             title: 'Timetable',
             onEdit: () =>
                 context.go(OnboardingStep.routeFor(OnboardingStep.timetable)),
             children: [
-              timetableAsync.when(
-                data: (entries) => entries.isEmpty
-                    ? _EmptyChip(state.timetableSkipped ? 'Skipped' : 'Empty')
-                    : _ReviewRow(
-                        'Classes/week', '${entries.length} slots'),
+              lecturesAsync.when(
+                data: (lectures) => state.timetableSkipped
+                    ? const _EmptyChip('Skipped')
+                    : lectures.isEmpty
+                        ? const _EmptyChip('Empty')
+                        : _ReviewRow(
+                            'Classes/week', '${lectures.length} slots'),
                 loading: () => const LinearProgressIndicator(),
-                error: (_, __) => _EmptyChip('Error loading'),
-              ),
+                error: (_, __) => const _EmptyChip('Error loading'),
+              ),  
             ],
           ),
 

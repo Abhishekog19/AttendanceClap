@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -22,6 +24,7 @@ class _ObCollegeDetailsScreenState
   final _courseCtrl = TextEditingController();
   final _yearCtrl = TextEditingController();
   final _sectionCtrl = TextEditingController();
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -35,11 +38,28 @@ class _ObCollegeDetailsScreenState
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _collegeCtrl.dispose();
     _courseCtrl.dispose();
     _yearCtrl.dispose();
     _sectionCtrl.dispose();
     super.dispose();
+  }
+
+  void _scheduleAutosave() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      final repo = ref.read(onboardingRepositoryProvider);
+      final s = ref.read(onboardingNotifierProvider);
+      if (s.collegeName.isNotEmpty || s.courseName.isNotEmpty) {
+        repo.saveCollegeDetails(
+          collegeName: s.collegeName,
+          courseName: s.courseName,
+          year: s.year,
+          section: s.section,
+        );
+      }
+    });
   }
 
   @override
@@ -80,14 +100,20 @@ class _ObCollegeDetailsScreenState
             label: 'College / University',
             hint: 'e.g. IIT Bombay',
             controller: _collegeCtrl,
-            onChanged: notifier.setCollegeName,
+            onChanged: (v) {
+              notifier.setCollegeName(v);
+              _scheduleAutosave();
+            },
           ),
           const SizedBox(height: 20),
           _ObField(
             label: 'Course / Programme',
             hint: 'e.g. B.Tech Computer Science',
             controller: _courseCtrl,
-            onChanged: notifier.setCourseName,
+            onChanged: (v) {
+              notifier.setCourseName(v);
+              _scheduleAutosave();
+            },
           ),
           const SizedBox(height: 20),
           Row(
@@ -97,7 +123,10 @@ class _ObCollegeDetailsScreenState
                   label: 'Year',
                   hint: 'e.g. 2nd Year',
                   controller: _yearCtrl,
-                  onChanged: notifier.setYear,
+                  onChanged: (v) {
+                    notifier.setYear(v);
+                    _scheduleAutosave();
+                  },
                 ),
               ),
               const SizedBox(width: 12),
@@ -106,7 +135,10 @@ class _ObCollegeDetailsScreenState
                   label: 'Section',
                   hint: 'e.g. A',
                   controller: _sectionCtrl,
-                  onChanged: notifier.setSection,
+                  onChanged: (v) {
+                    notifier.setSection(v);
+                    _scheduleAutosave();
+                  },
                 ),
               ),
             ],
@@ -129,7 +161,7 @@ class _ObCollegeDetailsScreenState
         onPressed: () async {
           final ok = await notifier.saveCollegeDetails();
           if (ok && context.mounted) {
-            context.go(OnboardingStep.routeFor(OnboardingStep.semester));
+            await notifier.navigateNext(context, OnboardingStep.college);
           }
         },
       ),

@@ -189,7 +189,7 @@ class SchedulePreviewScreen extends ConsumerWidget {
                             ],
                           ),
                         ),
-                        Icon(Icons.check_circle,
+                        const Icon(Icons.check_circle,
                             color: Colors.green, size: 18),
                       ],
                     ),

@@ -316,7 +316,7 @@ class _ForecastRow extends StatelessWidget {
               const SizedBox(width: 4),
               Text(
                 '${prediction.projectedPct.toStringAsFixed(1)}%',
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                   color: AppColors.success,

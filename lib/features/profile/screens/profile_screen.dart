@@ -216,6 +216,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 ),
                 Divider(height: 1, indent: AppSpacing.md, color: borderColor),
                 _SettingsTile(
+                  icon: Icons.calendar_view_week_rounded,
+                  title: 'Edit Timetable',
+                  subtitle: 'Add, move or remove classes',
+                  iconColor: primary,
+                  onSurface: onSurface,
+                  onSurfaceVariant: onSurfaceVariant,
+                  onTap: () => context.push('/timetable/edit'),
+                ),
+                Divider(height: 1, indent: AppSpacing.md, color: borderColor),
+                _SettingsTile(
                   icon: Icons.help_outline,
                   title: 'Help & Support',
                   iconColor: onSurfaceVariant,

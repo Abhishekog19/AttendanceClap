@@ -5,7 +5,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
-import 'package:flutter_timezone/timezone_info.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -61,7 +60,7 @@ class NotificationService {
     const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    final initSettings = InitializationSettings(android: androidSettings);
+    const initSettings = InitializationSettings(android: androidSettings);
 
     await _plugin.initialize(
       initSettings,
@@ -119,14 +118,14 @@ class NotificationService {
       id,
       title,
       body,
-      NotificationDetails(
+      const NotificationDetails(
         android: AndroidNotificationDetails(
           NotificationChannels.classReminders,
           'Class Reminders',
           importance: Importance.high,
           priority: Priority.high,
           actions: [
-            const AndroidNotificationAction(
+            AndroidNotificationAction(
               'action_absent_today',
               '❌ Absent Today',
               cancelNotification: true,
@@ -204,7 +203,7 @@ class NotificationService {
       id,
       '⚠️ ${subject.name} attendance low',
       body,
-      NotificationDetails(
+      const NotificationDetails(
         android: AndroidNotificationDetails(
           NotificationChannels.attendanceAlerts,
           'Attendance Alerts',

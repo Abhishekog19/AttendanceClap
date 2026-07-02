@@ -1,6 +1,5 @@
 import 'package:equatable/equatable.dart';
 import '../../../data/models/subject_model.dart';
-import '../../../data/models/timetable_entry_model.dart';
 
 // ─── Onboarding Step Keys ─────────────────────────────────────────────────────
 
@@ -136,8 +135,6 @@ class OnboardingState extends Equatable {
   final List<SubjectModel> subjects;
 
   // ── Timetable ─────────────────────────────────────────────────────────────
-  /// Saved timetable entries (read from Firestore stream, not in-memory only).
-  final List<TimetableEntry> timetableEntries;
   final bool timetableSkipped;
 
   // ── Holidays ──────────────────────────────────────────────────────────────
@@ -166,7 +163,6 @@ class OnboardingState extends Equatable {
     // Subjects
     this.subjects = const [],
     // Timetable
-    this.timetableEntries = const [],
     this.timetableSkipped = false,
     // Holidays
     this.holidays = const [],
@@ -207,7 +203,6 @@ class OnboardingState extends Equatable {
     double? attendanceGoal,
     Object? semesterId = _sentinel,
     List<SubjectModel>? subjects,
-    List<TimetableEntry>? timetableEntries,
     bool? timetableSkipped,
     List<DateTime>? holidays,
     bool? holidaysSkipped,
@@ -233,7 +228,6 @@ class OnboardingState extends Equatable {
         semesterId:
             semesterId == _sentinel ? this.semesterId : semesterId as String?,
         subjects: subjects ?? this.subjects,
-        timetableEntries: timetableEntries ?? this.timetableEntries,
         timetableSkipped: timetableSkipped ?? this.timetableSkipped,
         holidays: holidays ?? this.holidays,
         holidaysSkipped: holidaysSkipped ?? this.holidaysSkipped,
@@ -248,7 +242,7 @@ class OnboardingState extends Equatable {
         currentStep, isLoading, error,
         collegeName, courseName, year, section,
         semesterName, semesterStart, semesterEnd, attendanceGoal, semesterId,
-        subjects, timetableEntries, timetableSkipped,
+        subjects, timetableSkipped,
         holidays, holidaysSkipped,
         importData, importSkipped,
       ];

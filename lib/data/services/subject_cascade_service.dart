@@ -31,8 +31,7 @@ class SubjectCascadeService {
   /// Collections updated:
   ///   • class_sessions    → subjectName (by subjectId)
   ///   • attendance_logs   → subjectName (by subjectId)
-  ///   • timetable_entries → subject by subjectId (new entries)
-  ///                       → subject by old name (legacy entries without subjectId)
+  ///   • timetable/config/lectures → (no rename needed — lectures reference by subjectId only)
   ///   • daily_overrides   → newSubjectName (collection group query)
   Future<void> propagateRename(
     String uid,
@@ -60,24 +59,8 @@ class SubjectCascadeService {
       value: newName,
     );
 
-    // 3a. timetable_entries — update entries WITH subjectId (new entries)
-    await _batchSetField(
-      query: userDoc
-          .collection('timetable_entries')
-          .where('subjectId', isEqualTo: subjectId),
-      field: 'subject',
-      value: newName,
-    );
-
-    // 3b. timetable_entries — update LEGACY entries matched by old subject name
-    //     (entries created before the subjectId field was added)
-    await _batchSetField(
-      query: userDoc
-          .collection('timetable_entries')
-          .where('subject', isEqualTo: oldName),
-      field: 'subject',
-      value: newName,
-    );
+    // 3. timetable/config/lectures — lectures reference subjects by ID only,
+    //    so no field update is needed on rename.
 
     // 4. daily_overrides — use collection group to find overrides across all date docs
     await _batchSetFieldCollectionGroup(
@@ -99,10 +82,10 @@ class SubjectCascadeService {
   /// timetable entries that lack the subjectId field.
   ///
   /// Strategy:
-  ///   • class_sessions    → HARD DELETE (sessions have no independent value)
-  ///   • attendance_logs   → SOFT ARCHIVE (isArchived: true) — preserves history
-  ///   • timetable_entries → HARD DELETE (by subjectId for new + by name for legacy)
-  ///   • daily_overrides   → HARD DELETE (overrides reference deleted subject)
+  ///   • class_sessions        → HARD DELETE (sessions have no independent value)
+  ///   • attendance_logs       → SOFT ARCHIVE (isArchived: true) — preserves history
+  ///   • timetable/config/lectures → HARD DELETE (by subjectId)
+  ///   • daily_overrides       → HARD DELETE (overrides reference deleted subject)
   ///   • notification_alert_state → HARD DELETE (per-subject doc)
   Future<void> cascadeDelete(String uid, String subjectId,
       {String? subjectName}) async {
@@ -124,21 +107,14 @@ class SubjectCascadeService {
       value: true,
     );
 
-    // 3a. Hard delete timetable_entries WITH subjectId (new entries)
+    // 3. Hard delete timetable/config/lectures for this subject
     await _batchDeleteDocs(
       query: userDoc
-          .collection('timetable_entries')
+          .collection('timetable')
+          .doc('config')
+          .collection('lectures')
           .where('subjectId', isEqualTo: subjectId),
     );
-
-    // 3b. Hard delete LEGACY timetable_entries matched by subject name
-    if (subjectName != null) {
-      await _batchDeleteDocs(
-        query: userDoc
-            .collection('timetable_entries')
-            .where('subject', isEqualTo: subjectName),
-      );
-    }
 
     // 4. Hard delete daily_overrides referencing this subject (collection group)
     await _batchDeleteCollectionGroup(
@@ -149,8 +125,6 @@ class SubjectCascadeService {
     );
 
     // 5. Delete the notification alert state document for this subject.
-    //    DocumentReference.delete() silently succeeds for non-existent docs —
-    //    no try-catch needed.
     await userDoc
         .collection('notification_alert_state')
         .doc(subjectId)
