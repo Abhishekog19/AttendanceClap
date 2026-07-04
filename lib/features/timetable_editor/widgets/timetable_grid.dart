@@ -61,6 +61,87 @@ double minutesToY(int minutes, int rangeStart) =>
 int yToMinutes(double y, int rangeStart) =>
     rangeStart + (y / _kPxPerMinute).round();
 
+// ─── Phase D — Drag state and candidate algorithm ─────────────────────────────
+
+/// Tracks one in-progress long-press drag.
+/// [ghostStartMins] is the snapped candidate position shown to the user.
+class _DragInfo {
+  final LectureBlock lecture;
+  final String day;
+  int ghostStartMins;
+
+  _DragInfo({
+    required this.lecture,
+    required this.day,
+    required this.ghostStartMins,
+  });
+
+  _DragInfo withGhost(int mins) => _DragInfo(
+        lecture: lecture,
+        day: day,
+        ghostStartMins: mins,
+      );
+}
+
+/// Candidate-snapping algorithm.
+/// Candidates are generated from three sources:
+///   1. Flush-after: start = end of each other block on this day.
+///   2. Flush-before: start = start of each other block − dragged duration.
+///   3. 15-min grid: rangeStart, rangeStart+15, …, rangeEnd − duration.
+/// All candidates are filtered to [rangeStart, rangeEnd − duration] and must
+/// not overlap any existing block (excluding the block being dragged).
+/// Returns the candidate nearest to [fingerMins], or [fingerMins] clamped to
+/// range if no valid candidate exists.
+int _findBestCandidate({
+  required int fingerMins,
+  required int durationMinutes,
+  required List<LectureBlock> lectures,
+  required String excludeId,
+  required int rangeStart,
+  required int rangeEnd,
+}) {
+  final others = lectures.where((l) => l.id != excludeId).toList();
+
+  final candidates = <int>{};
+
+  // 1. Flush-after each other block
+  for (final l in others) {
+    candidates.add(l.startHour * 60 + l.startMinute + l.durationMinutes);
+  }
+  // 2. Flush-before each other block
+  for (final l in others) {
+    candidates.add(l.startHour * 60 + l.startMinute - durationMinutes);
+  }
+  // 3. 15-min grid throughout the range
+  for (int m = rangeStart; m <= rangeEnd - durationMinutes; m += 15) {
+    candidates.add(m);
+  }
+
+  // Filter: must be within the visible range AND must not overlap any other block
+  bool overlaps(int start) {
+    final end = start + durationMinutes;
+    for (final l in others) {
+      final lStart = l.startHour * 60 + l.startMinute;
+      final lEnd = lStart + l.durationMinutes;
+      if (start < lEnd && lStart < end) return true;
+    }
+    return false;
+  }
+
+  final valid = candidates
+      .where((c) =>
+          c >= rangeStart &&
+          c + durationMinutes <= rangeEnd &&
+          !overlaps(c))
+      .toList()
+    ..sort((a, b) => (a - fingerMins).abs().compareTo((b - fingerMins).abs()));
+
+  if (valid.isEmpty) {
+    return fingerMins.clamp(rangeStart, rangeEnd - durationMinutes);
+  }
+  return valid.first;
+}
+
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
 class TimetableGrid extends ConsumerStatefulWidget {
@@ -88,6 +169,13 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
   // Phase C: per-block revealed state. Only one block can be revealed at a time.
   // Null = all blocks are in their collapsed (default) state.
   String? _revealedId;
+
+  // Phase D: active drag tracking.
+  _DragInfo? _drag;
+  // One GlobalKey per day column so onDragUpdate can convert global→local Y.
+  final _columnKeys = {
+    for (final day in kDayOrder) day: GlobalKey()
+  };
 
   @override
   void initState() {
@@ -243,6 +331,7 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
                               if (dayLectures.any((l) => l.id == id)) id,
                           };
                           return _TimelineColumn(
+                            key: _columnKeys[day],
                             day: day,
                             lectures: dayLectures,
                             conflictIds: dayConflicts,
@@ -262,7 +351,14 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
                             onDeleteBlock: _onDeleteBlock,
                             onOpenBlockSheet: _onOpenBlockSheet,
                             onCollapseRevealed: _onCollapseRevealed,
-                            onBlockLongPress: _onBlockLongPress,
+                            // Phase D: drag state for this column
+                            dragInfo: (_drag?.day == day) ? _drag : null,
+                            onDragStart: (lecture) =>
+                                _onDragStart(lecture, rangeStart),
+                            onDragUpdate: (global) =>
+                                _onDragUpdate(day, global, rangeStart),
+                            onDragEnd: () => _onDragEnd(),
+                            onDragCancel: () => _onDragCancel(),
                           );
                         }).toList(),
                       ),
@@ -352,18 +448,71 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
     if (_revealedId != null) setState(() => _revealedId = null);
   }
 
-  // Long-press: retained until Phase D replaces it with drag.
-  // Never called when in placement mode (column handler takes precedence).
-  void _onBlockLongPress(LectureBlock lecture) {
+  // ── Phase D: Drag handlers ────────────────────────────────────────────────
+
+  /// Long-press began — haptic + record drag start.
+  /// [initialGhostMins] is the lecture's current start so the ghost
+  /// appears exactly where the block already is.
+  void _onDragStart(LectureBlock lecture, int rangeStart) {
     HapticFeedback.mediumImpact();
+    // Collapse any revealed block so the UI stays unambiguous during drag.
+    setState(() {
+      _revealedId = null;
+      _drag = _DragInfo(
+        lecture: lecture,
+        day: lecture.day,
+        ghostStartMins: lecture.startHour * 60 + lecture.startMinute,
+      );
+    });
+  }
+
+  /// Finger moved — re-run candidate snapping and update ghost position.
+  void _onDragUpdate(String day, Offset globalPos, int rangeStart) {
+    if (_drag == null) return;
+    // Convert global finger position to local Y within the day column.
+    final box = _columnKeys[day]?.currentContext?.findRenderObject()
+        as RenderBox?;
+    if (box == null) return;
+    final localY = box.globalToLocal(globalPos).dy;
+    final fingerMins = yToMinutes(localY, rangeStart);
+
+    // Re-run candidate algorithm on the latest state.
     final state = ref.read(timetableEditorNotifierProvider);
-    final subject = state.data.subjectById(lecture.subjectId);
-    showCellBottomSheet(
-      context: context,
-      ref: ref,
-      lecture: lecture,
-      subject: subject,
+    final rangeEnd = state.data.gridEndHour * 60;
+    final candidate = _findBestCandidate(
+      fingerMins: fingerMins,
+      durationMinutes: _drag!.lecture.durationMinutes,
+      lectures: state.data.lecturesForDay(day),
+      excludeId: _drag!.lecture.id,
+      rangeStart: rangeStart,
+      rangeEnd: rangeEnd,
     );
+
+    if (candidate != _drag!.ghostStartMins) {
+      setState(() => _drag!.ghostStartMins = candidate);
+    }
+  }
+
+  /// Drag released — commit the ghost position as the new start time.
+  void _onDragEnd() {
+    if (_drag == null) return;
+    final ghostMins = _drag!.ghostStartMins;
+    final h = ghostMins ~/ 60;
+    final m = ghostMins % 60;
+    final newStart =
+        '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+    HapticFeedback.lightImpact();
+    ref.read(timetableEditorNotifierProvider.notifier).updateLectureTime(
+          _drag!.lecture.id,
+          startTime: newStart,
+          durationMinutes: _drag!.lecture.durationMinutes,
+        );
+    setState(() => _drag = null);
+  }
+
+  /// Drag cancelled (finger lifted outside a valid target, scroll interrupted).
+  void _onDragCancel() {
+    if (_drag != null) setState(() => _drag = null);
   }
 }
 
@@ -434,9 +583,11 @@ class _TimeLabelColumn extends StatelessWidget {
 // ─── Timeline Column ──────────────────────────────────────────────────────────
 // Phase A: receives only per-day data so only the affected column rebuilds.
 // Phase C: receives revealedId + callbacks for the state machine.
+// Phase D: receives dragInfo + drag callbacks; renders ghost + hover tint.
 
 class _TimelineColumn extends StatelessWidget {
   const _TimelineColumn({
+    super.key,
     required this.day,
     required this.lectures,
     required this.conflictIds,
@@ -455,7 +606,12 @@ class _TimelineColumn extends StatelessWidget {
     required this.onDeleteBlock,
     required this.onOpenBlockSheet,
     required this.onCollapseRevealed,
-    required this.onBlockLongPress,
+    // Phase D callbacks
+    required this.dragInfo,
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+    required this.onDragCancel,
   });
 
   final String day;
@@ -476,7 +632,12 @@ class _TimelineColumn extends StatelessWidget {
   final void Function(LectureBlock) onDeleteBlock;
   final void Function(LectureBlock) onOpenBlockSheet;
   final VoidCallback onCollapseRevealed;
-  final void Function(LectureBlock) onBlockLongPress;
+  // Phase D
+  final _DragInfo? dragInfo;
+  final void Function(LectureBlock) onDragStart;
+  final void Function(Offset) onDragUpdate;
+  final VoidCallback onDragEnd;
+  final VoidCallback onDragCancel;
 
   SubjectModel? _subjectById(String id) {
     try {
@@ -490,6 +651,7 @@ class _TimelineColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     final sortedLectures = [...lectures]
       ..sort((a, b) => _startMins(a).compareTo(_startMins(b)));
+    final isDragActive = dragInfo != null;
 
     return GestureDetector(
       // Placement mode: tap empty area to place lecture
@@ -505,7 +667,7 @@ class _TimelineColumn extends StatelessWidget {
         child: Stack(
           clipBehavior: Clip.hardEdge,
           children: [
-            // ── Background: column fill + right border ─────────────────────
+            // ── Background: column fill + drag hover tint ─────────────────────
             AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               width: _kCellWidth,
@@ -514,7 +676,12 @@ class _TimelineColumn extends StatelessWidget {
                   ? (dark
                       ? const Color(0xFF1A1C25)
                       : const Color(0xFFF0F2FF))
-                  : surface,
+                  : isDragActive
+                      // Phase D: subtle tint while dragging in this column
+                      ? (dark
+                          ? const Color(0xFF1D1F2B)
+                          : const Color(0xFFF3F4FF))
+                      : surface,
             ),
             // Right border
             Positioned(
@@ -552,6 +719,7 @@ class _TimelineColumn extends StatelessWidget {
               final subject = _subjectById(lecture.subjectId);
               final hasConflict = conflictIds.contains(lecture.id);
               final isRevealed = revealedId == lecture.id;
+              final isDraggingThis = dragInfo?.lecture.id == lecture.id;
 
               final startMins = _startMins(lecture);
               // Phase B: use shared minutesToY utility
@@ -576,6 +744,7 @@ class _TimelineColumn extends StatelessWidget {
                 // Phase A: RepaintBoundary isolates each block's paint pass
                 child: RepaintBoundary(
                   // Phase C: _BlockCell handles collapsed/revealed state machine
+                  // Phase D: isDragging dims the block while it floats
                   child: _BlockCell(
                     lecture: lecture,
                     subject: subject,
@@ -583,17 +752,40 @@ class _TimelineColumn extends StatelessWidget {
                     suppressBottom: suppressBottom,
                     dark: dark,
                     isRevealed: isRevealed,
+                    isDragging: isDraggingThis,
                     blockHeight: height,
                     blockTop: top,
                     columnHeight: columnHeight,
                     onReveal: () => onRevealBlock(lecture),
                     onDelete: () => onDeleteBlock(lecture),
                     onOpenSheet: () => onOpenBlockSheet(lecture),
-                    onLongPress: () => onBlockLongPress(lecture),
+                    onDragStart: () => onDragStart(lecture),
+                    onDragUpdate: onDragUpdate,
+                    onDragEnd: onDragEnd,
+                    onDragCancel: onDragCancel,
                   ),
                 ),
               );
             }),
+
+            // ── Phase D: Drag ghost (snapped candidate preview) ─────────────
+            if (isDragActive) ...[
+              Positioned(
+                top: math.max(
+                    0.0, minutesToY(dragInfo!.ghostStartMins, rangeStart)),
+                left: 1,
+                right: 1,
+                height: math.max(
+                    20.0,
+                    dragInfo!.lecture.durationMinutes * _kPxPerMinute),
+                child: IgnorePointer(
+                  child: _DragGhost(
+                    subject: _subjectById(dragInfo!.lecture.subjectId),
+                    dark: dark,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -604,7 +796,13 @@ class _TimelineColumn extends StatelessWidget {
       l.startHour * 60 + l.startMinute;
 }
 
-// ─── Block Cell (Phase C state machine) ────────────────────────────────────────
+// ─── Block Cell (Phase C/D state machine) ───────────────────────────────────────
+//
+// Phase C state machine: collapsed → revealed → cross-delete / edit-sheet.
+// Phase D: long-press triggers LongPressDraggable instead of opening a sheet.
+//   feedback  = _DragFeedback (floating tile that follows finger)
+//   childWhenDragging = 35% opacity tile (stays in original position)
+//   isDragging = true when THIS block is the one being dragged.
 
 class _BlockCell extends StatelessWidget {
   const _BlockCell({
@@ -614,13 +812,17 @@ class _BlockCell extends StatelessWidget {
     required this.suppressBottom,
     required this.dark,
     required this.isRevealed,
+    required this.isDragging,
     required this.blockHeight,
     required this.blockTop,
     required this.columnHeight,
     required this.onReveal,
     required this.onDelete,
     required this.onOpenSheet,
-    required this.onLongPress,
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+    required this.onDragCancel,
   });
 
   final LectureBlock lecture;
@@ -629,13 +831,18 @@ class _BlockCell extends StatelessWidget {
   final bool suppressBottom;
   final bool dark;
   final bool isRevealed;
+  /// True when this block is currently being dragged (it floats as feedback).
+  final bool isDragging;
   final double blockHeight;
   final double blockTop;
   final double columnHeight;
   final VoidCallback onReveal;
   final VoidCallback onDelete;
   final VoidCallback onOpenSheet;
-  final VoidCallback onLongPress;
+  final VoidCallback onDragStart;
+  final void Function(Offset) onDragUpdate;
+  final VoidCallback onDragEnd;
+  final VoidCallback onDragCancel;
 
   // A block shorter than this threshold (~25 min at 1.2 px/min) can't display
   // name + time + cross without clipping in revealed state.
@@ -645,40 +852,68 @@ class _BlockCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tile = _LectureBlockTile(
+    // When dragging, the block dims in-place; the floating feedback is shown
+    // by LongPressDraggable separately.
+    final tile = Opacity(
+      opacity: isDragging ? 0.30 : 1.0,
+      child: _LectureBlockTile(
+        lecture: lecture,
+        subject: subject,
+        hasConflict: hasConflict,
+        suppressBottom: suppressBottom,
+        dark: dark,
+        isRevealed: isRevealed && !isDragging,
+        onDelete: (isRevealed && !isDragging) ? onDelete : null,
+      ),
+    );
+
+    // Phase D: feedback widget that floats with the finger.
+    final feedback = _DragFeedback(
       lecture: lecture,
       subject: subject,
-      hasConflict: hasConflict,
-      suppressBottom: suppressBottom,
-      dark: dark,
-      isRevealed: isRevealed,
-      onDelete: isRevealed ? onDelete : null,
+      blockHeight: blockHeight,
     );
 
     if (!isRevealed) {
-      // Collapsed: tap reveals, long-press opens detail sheet.
-      return GestureDetector(
-        onTap: onReveal,
-        onLongPress: onLongPress,
-        behavior: HitTestBehavior.opaque,
-        child: tile,
+      // Collapsed: tap → reveal.  Long-press → drag.
+      return LongPressDraggable<LectureBlock>(
+        data: lecture,
+        delay: const Duration(milliseconds: 350),
+        feedback: feedback,
+        childWhenDragging: Opacity(opacity: 0.30, child: tile),
+        onDragStarted: onDragStart,
+        onDragUpdate: (d) => onDragUpdate(d.globalPosition),
+        onDragEnd: (_) => onDragEnd(),
+        onDraggableCanceled: (_, __) => onDragCancel(),
+        child: GestureDetector(
+          onTap: onReveal,
+          behavior: HitTestBehavior.opaque,
+          child: tile,
+        ),
       );
     }
 
-    // Revealed: body tap opens sheet, long-press opens sheet.
-    // The × icon GestureDetector lives inside _LectureBlockTile and is
-    // handled first (innermost wins in Flutter's gesture arena).
-    Widget body = GestureDetector(
-      onTap: onOpenSheet,
-      onLongPress: onLongPress,
-      behavior: HitTestBehavior.opaque,
-      child: tile,
+    // Revealed: tap body → open detail sheet.  Long-press → drag.
+    // The × icon GestureDetector (innermost) still wins for cross-taps.
+    Widget body = LongPressDraggable<LectureBlock>(
+      data: lecture,
+      delay: const Duration(milliseconds: 350),
+      feedback: feedback,
+      childWhenDragging: Opacity(opacity: 0.30, child: tile),
+      onDragStarted: onDragStart,
+      onDragUpdate: (d) => onDragUpdate(d.globalPosition),
+      onDragEnd: (_) => onDragEnd(),
+      onDraggableCanceled: (_, __) => onDragCancel(),
+      child: GestureDetector(
+        onTap: onOpenSheet,
+        behavior: HitTestBehavior.opaque,
+        child: tile,
+      ),
     );
 
     // Small-block overflow: allow revealed overlay to extend beyond the
     // Positioned bounds so content isn't clipped.
     if (blockHeight < _kShortBlockThreshold) {
-      // Prefer overflowing downward; near column bottom, overflow upward.
       final spaceBelow = columnHeight - blockTop - blockHeight;
       final alignment = spaceBelow >= _kRevealedMinHeight - blockHeight
           ? Alignment.topLeft
@@ -836,7 +1071,118 @@ class _LectureBlockTile extends StatelessWidget {
   }
 }
 
-// ─── Hour Line Painter ────────────────────────────────────────────────────────
+/// The floating widget that follows the finger during a drag.
+/// Rendered at 1.03× scale with elevation shadow to give a "lifted" feel.
+class _DragFeedback extends StatelessWidget {
+  const _DragFeedback({
+    required this.lecture,
+    required this.subject,
+    required this.blockHeight,
+  });
+
+  final LectureBlock lecture;
+  final SubjectModel? subject;
+  final double blockHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = subject != null
+        ? hexToColor(subject!.effectiveColorHex)
+        : Colors.grey.shade400;
+    final textColor = color.computeLuminance() > 0.35
+        ? const Color(0xFF111318)
+        : Colors.white;
+
+    return Material(
+      color: Colors.transparent,
+      child: Transform.scale(
+        scale: 1.03,
+        child: Container(
+          width: _kCellWidth - 2,
+          height: blockHeight,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(5),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.40),
+                blurRadius: 14,
+                spreadRadius: 1,
+                offset: const Offset(0, 5),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.20),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.fromLTRB(5, 4, 5, 2),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                subject?.effectiveShortName ?? '?',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: textColor,
+                  height: 1.1,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (blockHeight >= 24)
+                Text(
+                  '${lecture.startTime}–${lecture.endTime}',
+                  style: GoogleFonts.inter(
+                    fontSize: 9,
+                    color: textColor.withValues(alpha: 0.75),
+                    height: 1.3,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Ghost block shown at the snapped candidate position during drag.
+/// Uses an outlined style so it's clearly distinct from real blocks.
+class _DragGhost extends StatelessWidget {
+  const _DragGhost({
+    required this.subject,
+    required this.dark,
+  });
+
+  final SubjectModel? subject;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = subject != null
+        ? hexToColor(subject!.effectiveColorHex)
+        : Colors.grey.shade400;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(
+          color: color.withValues(alpha: 0.60),
+          width: 1.5,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Hour Line Painter ──────────────────────────────────────────────────────────
 
 class _HourLinePainter extends CustomPainter {
   const _HourLinePainter({
