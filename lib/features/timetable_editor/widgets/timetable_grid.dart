@@ -47,6 +47,20 @@ const _kLabelWidth   = 52.0;
 const _kHeaderHeight = 48.0;
 const _kMinSnapMinutes = 15;
 
+// ─── Shared pixel ↔ time conversion utilities (Phase B) ─────────────────────
+// Single source of truth — both the renderer AND every gesture handler call
+// these. Prevents drift if layout constants or rangeStart ever diverge.
+
+/// Converts an absolute minute value (since midnight) to a Y pixel offset
+/// within the day column, given the column's visible range start and scale.
+double minutesToY(int minutes, int rangeStart) =>
+    (minutes - rangeStart) * _kPxPerMinute;
+
+/// Converts a Y pixel offset within the day column back to an absolute
+/// minute value (since midnight), given the column's visible range start.
+int yToMinutes(double y, int rangeStart) =>
+    rangeStart + (y / _kPxPerMinute).round();
+
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
 class TimetableGrid extends ConsumerStatefulWidget {
@@ -217,9 +231,19 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: kDayOrder.map((day) {
+                          // Phase A: pass only per-day data so only the
+                          // affected column rebuilds when one lecture changes.
+                          final dayLectures = editorData.lecturesForDay(day);
+                          final dayConflicts = <String>{
+                            for (final id in fullState.conflicts.keys)
+                              if (dayLectures.any((l) => l.id == id)) id,
+                          };
                           return _TimelineColumn(
                             day: day,
-                            fullState: fullState,
+                            lectures: dayLectures,
+                            conflictIds: dayConflicts,
+                            isPlacementMode: fullState.ui.selectedSubjectId != null,
+                            subjects: editorData.subjects,
                             columnHeight: columnHeight,
                             rangeStart: rangeStart,
                             dark: dark,
@@ -267,8 +291,8 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
         ref.read(timetableEditorNotifierProvider).ui.selectedSubjectId;
     if (selectedId == null) return;
 
-    // Convert Y → raw minute value within the range
-    final rawMin = rangeStart + (localY / _kPxPerMinute).round();
+    // Phase B: use shared yToMinutes utility — single source of truth.
+    final rawMin = yToMinutes(localY, rangeStart);
     // Snap to nearest 15 minutes
     final snapped = ((rawMin / _kMinSnapMinutes).round() * _kMinSnapMinutes)
         .clamp(rangeStart, rangeStart + (data.gridEndHour - data.gridStartHour) * 60 - 15);
@@ -378,11 +402,15 @@ class _TimeLabelColumn extends StatelessWidget {
 }
 
 // ─── Timeline Column ──────────────────────────────────────────────────────────
+// Phase A: receives only per-day data so only the affected column rebuilds.
 
 class _TimelineColumn extends StatelessWidget {
   const _TimelineColumn({
     required this.day,
-    required this.fullState,
+    required this.lectures,
+    required this.conflictIds,
+    required this.isPlacementMode,
+    required this.subjects,
     required this.columnHeight,
     required this.rangeStart,
     required this.dark,
@@ -395,7 +423,10 @@ class _TimelineColumn extends StatelessWidget {
   });
 
   final String day;
-  final TimetableEditorFullState fullState;
+  final List<LectureBlock> lectures;
+  final Set<String> conflictIds;
+  final bool isPlacementMode;
+  final List<SubjectModel> subjects;
   final double columnHeight;
   final int rangeStart;
   final bool dark;
@@ -406,12 +437,18 @@ class _TimelineColumn extends StatelessWidget {
   final void Function(LectureBlock) onBlockTap;
   final void Function(LectureBlock) onBlockLongPress;
 
+  SubjectModel? _subjectById(String id) {
+    try {
+      return subjects.firstWhere((s) => s.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final data = fullState.data;
-    final lectures = data.lecturesForDay(day)
+    final sortedLectures = [...lectures]
       ..sort((a, b) => _startMins(a).compareTo(_startMins(b)));
-    final isPlacementMode = fullState.ui.selectedSubjectId != null;
 
     return GestureDetector(
       onTapDown: isPlacementMode
@@ -455,7 +492,7 @@ class _TimelineColumn extends StatelessWidget {
             ),
 
             // ── Placement mode: "+ add" hint icon ──────────────────────────
-            if (isPlacementMode && lectures.isEmpty)
+            if (isPlacementMode && sortedLectures.isEmpty)
               Center(
                 child: Icon(
                   Icons.add_rounded,
@@ -467,20 +504,18 @@ class _TimelineColumn extends StatelessWidget {
               ),
 
             // ── Lecture blocks ─────────────────────────────────────────────
-            ...lectures.map((lecture) {
-              final data_ = fullState.data;
-              final subject = data_.subjectById(lecture.subjectId);
-              final hasConflict =
-                  fullState.conflicts.containsKey(lecture.id);
+            ...sortedLectures.map((lecture) {
+              final subject = _subjectById(lecture.subjectId);
+              final hasConflict = conflictIds.contains(lecture.id);
 
               final startMins = _startMins(lecture);
-              final top = math.max(
-                  0.0, (startMins - rangeStart) * _kPxPerMinute);
+              // Phase B: use shared minutesToY utility
+              final top = math.max(0.0, minutesToY(startMins, rangeStart));
               final height = math.max(
                   20.0, lecture.durationMinutes * _kPxPerMinute);
 
               // Contiguous same-subject block detection (suppress bottom border)
-              final nextSameSubject = lectures.firstWhereOrNull(
+              final nextSameSubject = sortedLectures.firstWhereOrNull(
                 (l) =>
                     l.subjectId == lecture.subjectId &&
                     l.startTime == lecture.endTime,
@@ -488,20 +523,24 @@ class _TimelineColumn extends StatelessWidget {
               final suppressBottom = nextSameSubject != null;
 
               return Positioned(
+                key: ValueKey(lecture.id),
                 top: top,
                 left: 1,
                 right: 1,
                 height: height,
-                child: GestureDetector(
-                  onTap: () => onBlockTap(lecture),
-                  onLongPress: () => onBlockLongPress(lecture),
-                  behavior: HitTestBehavior.opaque,
-                  child: _LectureBlockTile(
-                    lecture: lecture,
-                    subject: subject,
-                    hasConflict: hasConflict,
-                    suppressBottom: suppressBottom,
-                    dark: dark,
+                // Phase A: RepaintBoundary isolates each block's paint pass
+                child: RepaintBoundary(
+                  child: GestureDetector(
+                    onTap: () => onBlockTap(lecture),
+                    onLongPress: () => onBlockLongPress(lecture),
+                    behavior: HitTestBehavior.opaque,
+                    child: _LectureBlockTile(
+                      lecture: lecture,
+                      subject: subject,
+                      hasConflict: hasConflict,
+                      suppressBottom: suppressBottom,
+                      dark: dark,
+                    ),
                   ),
                 ),
               );
