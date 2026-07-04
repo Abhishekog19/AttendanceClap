@@ -85,6 +85,10 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
   final _horizBodyCtrl   = ScrollController();
   final _horizHeaderCtrl = ScrollController();
 
+  // Phase C: per-block revealed state. Only one block can be revealed at a time.
+  // Null = all blocks are in their collapsed (default) state.
+  String? _revealedId;
+
   @override
   void initState() {
     super.initState();
@@ -250,11 +254,15 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
                             border: _border(dark),
                             surface: _surface(dark),
                             primary: _primary(dark),
+                            // Phase C: reveal/collapse state
+                            revealedId: _revealedId,
                             onTapDown: (localY) =>
                                 _onColumnTap(day, localY, rangeStart, editorData),
-                            onBlockTap: (lecture) => _onBlockTap(lecture),
-                            onBlockLongPress: (lecture) =>
-                                _onBlockLongPress(lecture),
+                            onRevealBlock: _onRevealBlock,
+                            onDeleteBlock: _onDeleteBlock,
+                            onOpenBlockSheet: _onOpenBlockSheet,
+                            onCollapseRevealed: _onCollapseRevealed,
+                            onBlockLongPress: _onBlockLongPress,
                           );
                         }).toList(),
                       ),
@@ -278,7 +286,7 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
     );
   }
 
-  // ── Interaction handlers ──────────────────────────────────────────────────
+  // ── Interaction handlers ───────────────────────────────────────────────
 
   void _onColumnTap(
     String day,
@@ -310,19 +318,42 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
     });
   }
 
-  void _onBlockTap(LectureBlock lecture) {
+  // Phase C: Tap a collapsed block → reveal it.
+  // Tap a revealed block (via _onRevealBlock again) → collapse it.
+  void _onRevealBlock(LectureBlock lecture) {
     HapticFeedback.selectionClick();
-    final state = ref.read(timetableEditorNotifierProvider);
-    final subject = state.data.subjectById(lecture.subjectId);
+    setState(() {
+      _revealedId = (_revealedId == lecture.id) ? null : lecture.id;
+    });
+  }
+
+  // Phase C: Cross (x) tapped — immediate delete, no dialog.
+  void _onDeleteBlock(LectureBlock lecture) {
+    HapticFeedback.mediumImpact();
+    setState(() => _revealedId = null);
+    ref.read(timetableEditorNotifierProvider.notifier).deleteLecture(lecture.id);
+  }
+
+  // Phase C: Revealed block body tapped — open full detail sheet.
+  void _onOpenBlockSheet(LectureBlock lecture) {
+    setState(() => _revealedId = null);
+    HapticFeedback.selectionClick();
+    final subject = ref.read(timetableEditorNotifierProvider).data.subjectById(lecture.subjectId);
     showCellBottomSheet(
       context: context,
       ref: ref,
       lecture: lecture,
       subject: subject,
-      isQuick: true,
     );
   }
 
+  // Phase C: Tap anywhere outside a block — collapse the revealed block.
+  void _onCollapseRevealed() {
+    if (_revealedId != null) setState(() => _revealedId = null);
+  }
+
+  // Long-press: retained until Phase D replaces it with drag.
+  // Never called when in placement mode (column handler takes precedence).
   void _onBlockLongPress(LectureBlock lecture) {
     HapticFeedback.mediumImpact();
     final state = ref.read(timetableEditorNotifierProvider);
@@ -332,7 +363,6 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
       ref: ref,
       lecture: lecture,
       subject: subject,
-      isQuick: false,
     );
   }
 }
@@ -403,6 +433,7 @@ class _TimeLabelColumn extends StatelessWidget {
 
 // ─── Timeline Column ──────────────────────────────────────────────────────────
 // Phase A: receives only per-day data so only the affected column rebuilds.
+// Phase C: receives revealedId + callbacks for the state machine.
 
 class _TimelineColumn extends StatelessWidget {
   const _TimelineColumn({
@@ -418,7 +449,12 @@ class _TimelineColumn extends StatelessWidget {
     required this.surface,
     required this.primary,
     required this.onTapDown,
-    required this.onBlockTap,
+    // Phase C callbacks
+    required this.revealedId,
+    required this.onRevealBlock,
+    required this.onDeleteBlock,
+    required this.onOpenBlockSheet,
+    required this.onCollapseRevealed,
     required this.onBlockLongPress,
   });
 
@@ -434,7 +470,12 @@ class _TimelineColumn extends StatelessWidget {
   final Color surface;
   final Color primary;
   final void Function(double localY) onTapDown;
-  final void Function(LectureBlock) onBlockTap;
+  // Phase C
+  final String? revealedId;
+  final void Function(LectureBlock) onRevealBlock;
+  final void Function(LectureBlock) onDeleteBlock;
+  final void Function(LectureBlock) onOpenBlockSheet;
+  final VoidCallback onCollapseRevealed;
   final void Function(LectureBlock) onBlockLongPress;
 
   SubjectModel? _subjectById(String id) {
@@ -451,9 +492,12 @@ class _TimelineColumn extends StatelessWidget {
       ..sort((a, b) => _startMins(a).compareTo(_startMins(b)));
 
     return GestureDetector(
+      // Placement mode: tap empty area to place lecture
       onTapDown: isPlacementMode
           ? (details) => onTapDown(details.localPosition.dy)
           : null,
+      // Phase C: tap empty area (not on any block) collapses revealed block
+      onTap: isPlacementMode ? null : onCollapseRevealed,
       behavior: HitTestBehavior.opaque,
       child: SizedBox(
         width: _kCellWidth,
@@ -507,6 +551,7 @@ class _TimelineColumn extends StatelessWidget {
             ...sortedLectures.map((lecture) {
               final subject = _subjectById(lecture.subjectId);
               final hasConflict = conflictIds.contains(lecture.id);
+              final isRevealed = revealedId == lecture.id;
 
               final startMins = _startMins(lecture);
               // Phase B: use shared minutesToY utility
@@ -530,17 +575,21 @@ class _TimelineColumn extends StatelessWidget {
                 height: height,
                 // Phase A: RepaintBoundary isolates each block's paint pass
                 child: RepaintBoundary(
-                  child: GestureDetector(
-                    onTap: () => onBlockTap(lecture),
+                  // Phase C: _BlockCell handles collapsed/revealed state machine
+                  child: _BlockCell(
+                    lecture: lecture,
+                    subject: subject,
+                    hasConflict: hasConflict,
+                    suppressBottom: suppressBottom,
+                    dark: dark,
+                    isRevealed: isRevealed,
+                    blockHeight: height,
+                    blockTop: top,
+                    columnHeight: columnHeight,
+                    onReveal: () => onRevealBlock(lecture),
+                    onDelete: () => onDeleteBlock(lecture),
+                    onOpenSheet: () => onOpenBlockSheet(lecture),
                     onLongPress: () => onBlockLongPress(lecture),
-                    behavior: HitTestBehavior.opaque,
-                    child: _LectureBlockTile(
-                      lecture: lecture,
-                      subject: subject,
-                      hasConflict: hasConflict,
-                      suppressBottom: suppressBottom,
-                      dark: dark,
-                    ),
                   ),
                 ),
               );
@@ -555,7 +604,104 @@ class _TimelineColumn extends StatelessWidget {
       l.startHour * 60 + l.startMinute;
 }
 
-// ─── Lecture Block Tile ───────────────────────────────────────────────────────
+// ─── Block Cell (Phase C state machine) ────────────────────────────────────────
+
+class _BlockCell extends StatelessWidget {
+  const _BlockCell({
+    required this.lecture,
+    required this.subject,
+    required this.hasConflict,
+    required this.suppressBottom,
+    required this.dark,
+    required this.isRevealed,
+    required this.blockHeight,
+    required this.blockTop,
+    required this.columnHeight,
+    required this.onReveal,
+    required this.onDelete,
+    required this.onOpenSheet,
+    required this.onLongPress,
+  });
+
+  final LectureBlock lecture;
+  final SubjectModel? subject;
+  final bool hasConflict;
+  final bool suppressBottom;
+  final bool dark;
+  final bool isRevealed;
+  final double blockHeight;
+  final double blockTop;
+  final double columnHeight;
+  final VoidCallback onReveal;
+  final VoidCallback onDelete;
+  final VoidCallback onOpenSheet;
+  final VoidCallback onLongPress;
+
+  // A block shorter than this threshold (~25 min at 1.2 px/min) can't display
+  // name + time + cross without clipping in revealed state.
+  static const _kShortBlockThreshold = 30.0;
+  // Minimum height of the revealed overlay for short blocks.
+  static const _kRevealedMinHeight = 52.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final tile = _LectureBlockTile(
+      lecture: lecture,
+      subject: subject,
+      hasConflict: hasConflict,
+      suppressBottom: suppressBottom,
+      dark: dark,
+      isRevealed: isRevealed,
+      onDelete: isRevealed ? onDelete : null,
+    );
+
+    if (!isRevealed) {
+      // Collapsed: tap reveals, long-press opens detail sheet.
+      return GestureDetector(
+        onTap: onReveal,
+        onLongPress: onLongPress,
+        behavior: HitTestBehavior.opaque,
+        child: tile,
+      );
+    }
+
+    // Revealed: body tap opens sheet, long-press opens sheet.
+    // The × icon GestureDetector lives inside _LectureBlockTile and is
+    // handled first (innermost wins in Flutter's gesture arena).
+    Widget body = GestureDetector(
+      onTap: onOpenSheet,
+      onLongPress: onLongPress,
+      behavior: HitTestBehavior.opaque,
+      child: tile,
+    );
+
+    // Small-block overflow: allow revealed overlay to extend beyond the
+    // Positioned bounds so content isn't clipped.
+    if (blockHeight < _kShortBlockThreshold) {
+      // Prefer overflowing downward; near column bottom, overflow upward.
+      final spaceBelow = columnHeight - blockTop - blockHeight;
+      final alignment = spaceBelow >= _kRevealedMinHeight - blockHeight
+          ? Alignment.topLeft
+          : Alignment.bottomLeft;
+      body = OverflowBox(
+        alignment: alignment,
+        minHeight: _kRevealedMinHeight,
+        maxHeight: _kRevealedMinHeight,
+        minWidth: 0,
+        maxWidth: double.infinity,
+        child: body,
+      );
+    }
+
+    return body;
+  }
+}
+
+// ─── Lecture Block Tile ──────────────────────────────────────────────────────────────
+// Phase C: accepts [isRevealed] to show time range + × icon in revealed state.
+// The × icon has its OWN GestureDetector with HitTestBehavior.opaque so that
+// tapping it fires [onDelete] and does NOT propagate to the body tap handler
+// in _BlockCell (innermost GestureDetector wins in Flutter's gesture arena).
 
 class _LectureBlockTile extends StatelessWidget {
   const _LectureBlockTile({
@@ -564,6 +710,8 @@ class _LectureBlockTile extends StatelessWidget {
     required this.hasConflict,
     required this.suppressBottom,
     required this.dark,
+    required this.isRevealed,
+    this.onDelete,
   });
 
   final LectureBlock lecture;
@@ -571,6 +719,8 @@ class _LectureBlockTile extends StatelessWidget {
   final bool hasConflict;
   final bool suppressBottom;
   final bool dark;
+  final bool isRevealed;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -580,6 +730,7 @@ class _LectureBlockTile extends StatelessWidget {
     final textColor = color.computeLuminance() > 0.35
         ? const Color(0xFF111318)
         : Colors.white;
+    final dimText = textColor.withValues(alpha: 0.70);
 
     final borderRadius = BorderRadius.only(
       topLeft:     const Radius.circular(5),
@@ -590,7 +741,10 @@ class _LectureBlockTile extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.88),
+        // Revealed: slightly brighter fill to signal the active state.
+        color: isRevealed
+            ? color.withValues(alpha: 0.97)
+            : color.withValues(alpha: 0.88),
         borderRadius: borderRadius,
         border: hasConflict
             ? Border.all(color: Colors.red.shade400, width: 1.5)
@@ -604,9 +758,12 @@ class _LectureBlockTile extends StatelessWidget {
               ),
       ),
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
+          // ── Content: name + time range ──────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(5, 4, 5, 2),
+            // Right padding widens to make room for × when revealed
+            padding: EdgeInsets.fromLTRB(5, 4, isRevealed ? 18 : 5, 2),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -621,12 +778,14 @@ class _LectureBlockTile extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (lecture.durationMinutes >= 30)
+                // In revealed state: always show time range.
+                // In collapsed state: show only if block >= 30 min tall.
+                if (isRevealed || lecture.durationMinutes >= 30)
                   Text(
                     '${lecture.startTime}–${lecture.endTime}',
                     style: GoogleFonts.inter(
                       fontSize: 9,
-                      color: textColor.withValues(alpha: 0.75),
+                      color: dimText,
                       height: 1.3,
                     ),
                     maxLines: 1,
@@ -635,7 +794,10 @@ class _LectureBlockTile extends StatelessWidget {
               ],
             ),
           ),
-          if (hasConflict)
+
+          // ── Conflict warning icon (only in collapsed state) ─────────────────
+          // In revealed state the × icon takes this corner instead.
+          if (hasConflict && !isRevealed)
             Positioned(
               top: 3,
               right: 3,
@@ -643,6 +805,29 @@ class _LectureBlockTile extends StatelessWidget {
                 Icons.warning_amber_rounded,
                 size: 10,
                 color: Colors.red.shade300,
+              ),
+            ),
+
+          // ── Revealed: × delete button ─────────────────────────────────────
+          // Innermost GestureDetector: wins the gesture arena, so this tap
+          // NEVER also triggers the block-body tap handler in _BlockCell.
+          if (isRevealed)
+            Positioned(
+              top: 2,
+              right: 2,
+              child: GestureDetector(
+                onTap: onDelete,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 11,
+                    color: dimText,
+                  ),
+                ),
               ),
             ),
         ],

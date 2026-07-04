@@ -1,8 +1,9 @@
 /// Cell Bottom Sheet
 ///
-/// Two modes:
-///   isQuick=true  — lightweight tap popup: shows subject name, time, Remove button
-///   isQuick=false — full long-press sheet: time picker, duration, notes, Delete
+/// Phase C: the quick-remove path (isQuick=true) has been removed.
+/// Quick-remove is now the inline × button on each block.
+/// This function always shows the full detail sheet:
+/// start time picker (with overlap warning), duration stepper, notes, delete.
 library;
 
 import 'package:flutter/material.dart';
@@ -16,24 +17,14 @@ import '../providers/timetable_editor_notifier.dart';
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
+/// Opens the full lecture detail sheet for [lecture].
+/// Phase C: [isQuick] path removed — the × inline button handles quick-remove.
 Future<void> showCellBottomSheet({
   required BuildContext context,
   required WidgetRef ref,
   required LectureBlock lecture,
   required SubjectModel? subject,
-  required bool isQuick,
 }) {
-  if (isQuick) {
-    return showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _QuickSheet(
-        lecture: lecture,
-        subject: subject,
-        ref: ref,
-      ),
-    );
-  }
   return showModalBottomSheet(
     context: context,
     backgroundColor: Colors.transparent,
@@ -44,110 +35,6 @@ Future<void> showCellBottomSheet({
       ref: ref,
     ),
   );
-}
-
-// ─── Quick Sheet ──────────────────────────────────────────────────────────────
-
-class _QuickSheet extends StatelessWidget {
-  const _QuickSheet({
-    required this.lecture,
-    required this.subject,
-    required this.ref,
-  });
-
-  final LectureBlock lecture;
-  final SubjectModel? subject;
-  final WidgetRef ref;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark ? const Color(0xFF1E2028) : Colors.white;
-    final onSurface = isDark ? Colors.white : const Color(0xFF191B23);
-    final secondary = isDark ? const Color(0xFF8B8FA8) : const Color(0xFF8990B0);
-    final name = subject?.name ?? 'Unknown';
-    final color = subject != null
-        ? hexToColor(subject!.effectiveColorHex)
-        : Colors.grey;
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.1),
-            blurRadius: 20,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Subject pill
-            Row(
-              children: [
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    name,
-                    style: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: onSurface,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '${lecture.startTime} – ${lecture.endTime}  •  ${lecture.durationMinutes} min',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: secondary,
-              ),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  ref
-                      .read(timetableEditorNotifierProvider.notifier)
-                      .deleteLecture(lecture.id);
-                },
-                icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                label: const Text('Remove'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red.shade400,
-                  side: BorderSide(color: Colors.red.shade200),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 // ─── Detail Sheet ─────────────────────────────────────────────────────────────
@@ -173,6 +60,9 @@ class _DetailSheetState extends State<_DetailSheet> {
   late TextEditingController _notesCtrl;
   String? _selectedColor;
   bool _saving = false;
+  // Phase C: overlap warning — shown when the user picks a time that
+  // conflicts with another lecture on the same day.
+  String? _overlapWarning;
 
   @override
   void initState() {
@@ -200,11 +90,34 @@ class _DetailSheetState extends State<_DetailSheet> {
       initialTime: initial,
     );
     if (picked != null) {
+      final newStart =
+          '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
       setState(() {
-        _startTime =
-            '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+        _startTime = newStart;
+        _overlapWarning = _checkOverlap(newStart, _durationMinutes);
       });
     }
+  }
+
+  // Phase C: check if a proposed [startTime, startTime+duration] range
+  // overlaps any other lecture on the same day (excluding this lecture itself).
+  String? _checkOverlap(String startTime, int durationMinutes) {
+    final state = widget.ref.read(timetableEditorNotifierProvider);
+    final lectures = state.data.lecturesForDay(widget.lecture.day);
+    final parts = startTime.split(':');
+    final newStart = int.parse(parts[0]) * 60 + int.parse(parts[1]);
+    final newEnd = newStart + durationMinutes;
+    for (final l in lectures) {
+      if (l.id == widget.lecture.id) continue; // skip self
+      final lStart = l.startHour * 60 + l.startMinute;
+      final lEnd = lStart + l.durationMinutes;
+      if (newStart < lEnd && lStart < newEnd) {
+        final subject = state.data.subjectById(l.subjectId);
+        final name = subject?.effectiveShortName ?? l.subjectId;
+        return 'Overlaps with $name (${l.startTime}–${l.endTime})';
+      }
+    }
+    return null;
   }
 
   String get _endTime {
@@ -295,24 +208,43 @@ class _DetailSheetState extends State<_DetailSheet> {
                   dark: isDark,
                   secondary: secondary,
                   border: border,
-                  child: GestureDetector(
-                    onTap: _pickStartTime,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: border),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        _startTime,
-                        style: GoogleFonts.inter(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: onSurface,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      GestureDetector(
+                        onTap: _pickStartTime,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: _overlapWarning != null
+                                  ? Colors.red.shade400
+                                  : border,
+                            ),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            _startTime,
+                            style: GoogleFonts.inter(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: onSurface,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      if (_overlapWarning != null) ...[  
+                        const SizedBox(height: 4),
+                        Text(
+                          _overlapWarning!,
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: Colors.red.shade400,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(height: 12),
