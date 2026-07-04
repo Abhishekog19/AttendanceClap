@@ -14,6 +14,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../data/models/subject_model.dart';
+import '../../../data/repositories/subject_repository.dart';
 import '../../../data/repositories/timetable_repository.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../models/timetable_editor_models.dart';
@@ -78,6 +79,8 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
   StreamSubscription<Map<String, dynamic>>? _configSub;
   StreamSubscription<List<LectureBlock>>? _lecturesSub;
   Timer? _regenDebounce;
+  // Phase E: backfill runs at most once per notifier lifetime.
+  bool _backfillDone = false;
 
   @override
   TimetableEditorFullState build() {
@@ -132,6 +135,12 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
           _updateData(state.data.copyWith(subjects: next.value!));
           // Re-run purge whenever subjects list changes (e.g. a subject deleted)
           _purgeOrphanedLectures();
+          // Phase E: one-time backfill for subjects missing colorHex / shortName.
+          // Fire-and-forget — never blocks the UI or causes a provider cycle.
+          if (!_backfillDone && next.value!.isNotEmpty) {
+            _backfillDone = true;
+            ref.read(subjectRepositoryProvider).backfillSubjectMetadata();
+          }
         }
       },
       fireImmediately: true,

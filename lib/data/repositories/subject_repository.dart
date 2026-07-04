@@ -40,8 +40,18 @@ class SubjectRepository {
     int attendedClasses = 0,
     int totalClasses = 0,
     String? faculty,
+    String? colorHex,
+    String? shortName,
   }) async {
     final now = DateTime.now();
+    // Auto-assign color from palette.
+    // Query STORED colorHex only (not effectiveColorHex) so subjects that
+    // haven't been backfilled yet don't falsely occupy palette slots.
+    final existing = await _db.getSubjects(_uid);
+    final usedColors = existing
+        .where((s) => s.colorHex != null)
+        .map((s) => s.colorHex!)
+        .toList();
     final subject = SubjectModel(
       id: _uuid.v4(),
       name: name,
@@ -50,8 +60,40 @@ class SubjectRepository {
       faculty: faculty,
       createdAt: now,
       updatedAt: now,
+      colorHex: colorHex ?? nextSubjectColor(usedColors),
+      shortName: shortName ?? generateSubjectShortName(name),
     );
     await _db.addSubject(_uid, subject);
+  }
+
+  /// One-time backfill: patches any subject missing [colorHex] or [shortName].
+  /// Safe to call repeatedly — only writes subjects that actually need patching.
+  /// Call once after subjects first load to fix data created before this fix.
+  Future<void> backfillSubjectMetadata() async {
+    final subjects = await _db.getSubjects(_uid);
+    final needsPatch = subjects
+        .where((s) => s.colorHex == null || s.shortName == null)
+        .toList();
+    if (needsPatch.isEmpty) return;
+
+    // Build a list of already-assigned colors so cycling still picks unique ones.
+    final usedColors = subjects
+        .where((s) => s.colorHex != null)
+        .map((s) => s.colorHex!)
+        .toList();
+
+    for (final s in needsPatch) {
+      final color = s.colorHex ?? nextSubjectColor(usedColors);
+      if (s.colorHex == null) usedColors.add(color); // claim slot
+      await _db.updateSubject(
+        _uid,
+        s.copyWith(
+          colorHex: color,
+          shortName: s.shortName ?? generateSubjectShortName(s.name),
+          updatedAt: DateTime.now(),
+        ),
+      );
+    }
   }
 
   /// Updates a subject and propagates any name change to all dependent collections.

@@ -9,6 +9,8 @@
 ///   /users/{uid}/timetable/config/lectures/{id}   ← LectureBlock docs
 library;
 
+// ignore_for_file: avoid_equals_and_hash_code_on_mutable_classes
+
 import 'dart:ui';
 
 import '../../../data/models/subject_model.dart';
@@ -117,6 +119,32 @@ class LectureBlock {
       };
 
   static const _sentinel = Object();
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is LectureBlock &&
+        other.id == id &&
+        other.day == day &&
+        other.subjectId == subjectId &&
+        other.startTime == startTime &&
+        other.durationMinutes == durationMinutes &&
+        other.facultyName == facultyName &&
+        other.classroom == classroom &&
+        other.notes == notes;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        day,
+        subjectId,
+        startTime,
+        durationMinutes,
+        facultyName,
+        classroom,
+        notes,
+      );
 }
 
 // ─── ConflictInfo ─────────────────────────────────────────────────────────────
