@@ -37,27 +37,28 @@ class ObReviewScreen extends ConsumerWidget {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 32),
+          const SizedBox(height: 28),
           Text(
-            'Review your\nsetup',
-            style: GoogleFonts.inter(
+            'Review your plan',
+            style: GoogleFonts.plusJakartaSans(
               fontSize: 28,
               fontWeight: FontWeight.w800,
-              color: OnboardingColors.textPrimary,
-              height: 1.2,
-              letterSpacing: -0.5,
+              color: OnboardingColors.onSurface,
+              height: 1.28,
+              letterSpacing: -0.28,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             'Everything looks good? Hit Confirm to start tracking your attendance.',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: OnboardingColors.textSecondary,
+            style: GoogleFonts.hankenGrotesk(
+              fontSize: 16,
+              fontWeight: FontWeight.w400,
+              color: OnboardingColors.onSurfaceVariant,
               height: 1.5,
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 28),
 
           // ── College card ─────────────────────────────────────────
           _ReviewCard(
@@ -185,9 +186,18 @@ class _ReviewCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: OnboardingColors.surfaceCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: OnboardingColors.border),
+        color: OnboardingColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: OnboardingColors.outlineVariant.withValues(alpha: 0.5),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -196,30 +206,44 @@ class _ReviewCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
             child: Row(
               children: [
-                Icon(icon,
-                    size: 18, color: OnboardingColors.textPrimary),
-                const SizedBox(width: 8),
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: OnboardingColors.surfaceContainerHigh,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 17, color: OnboardingColors.onSurface),
+                ),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: Text(title,
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: OnboardingColors.textPrimary,
-                      )),
+                  child: Text(
+                    title,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: OnboardingColors.onSurface,
+                    ),
+                  ),
                 ),
                 TextButton(
                   onPressed: onEdit,
                   style: TextButton.styleFrom(
                     visualDensity: VisualDensity.compact,
-                    foregroundColor: OnboardingColors.textSecondary,
+                    foregroundColor: OnboardingColors.onSurfaceVariant,
                   ),
-                  child: Text('Edit',
-                      style: GoogleFonts.inter(fontSize: 13)),
+                  child: Text(
+                    'Edit',
+                    style: GoogleFonts.hankenGrotesk(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
-          const Divider(height: 1, color: OnboardingColors.divider),
+          const Divider(height: 1, color: OnboardingColors.outlineVariant),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -240,25 +264,30 @@ class _ReviewRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: OnboardingColors.textSecondary,
-              )),
+          Text(
+            label,
+            style: GoogleFonts.hankenGrotesk(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: OnboardingColors.onSurfaceVariant,
+            ),
+          ),
           const SizedBox(width: 8),
           Flexible(
-            child: Text(value,
-                textAlign: TextAlign.end,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: OnboardingColors.textPrimary,
-                )),
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.hankenGrotesk(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: OnboardingColors.onSurface,
+              ),
+            ),
           ),
         ],
       ),
@@ -274,14 +303,17 @@ class _EmptyChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: OnboardingColors.surface,
-        borderRadius: BorderRadius.circular(6),
+        color: OnboardingColors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(label,
-          style: GoogleFonts.inter(
-            fontSize: 12,
-            color: OnboardingColors.textSecondary,
-          )),
+      child: Text(
+        label,
+        style: GoogleFonts.hankenGrotesk(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: OnboardingColors.onSurfaceVariant,
+        ),
+      ),
     );
   }
 }

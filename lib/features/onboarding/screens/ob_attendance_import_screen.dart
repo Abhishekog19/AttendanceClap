@@ -50,50 +50,59 @@ class _ObAttendanceImportScreenState
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 32),
+          const SizedBox(height: 28),
           Text(
-            'Import existing\nattendance',
-            style: GoogleFonts.inter(
+            'Import your attendance',
+            style: GoogleFonts.plusJakartaSans(
               fontSize: 28,
               fontWeight: FontWeight.w800,
-              color: OnboardingColors.textPrimary,
-              height: 1.2,
-              letterSpacing: -0.5,
+              color: OnboardingColors.onSurface,
+              height: 1.28,
+              letterSpacing: -0.28,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             'Already attending classes this semester? Sync your current status so your predictions are accurate from day one.',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: OnboardingColors.textSecondary,
+            style: GoogleFonts.hankenGrotesk(
+              fontSize: 16,
+              fontWeight: FontWeight.w400,
+              color: OnboardingColors.onSurfaceVariant,
               height: 1.5,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: OnboardingColors.surface,
-              borderRadius: BorderRadius.circular(8),
+              color: OnboardingColors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: OnboardingColors.outlineVariant.withValues(alpha: 0.5),
+              ),
             ),
             child: Row(
               children: [
-                const Icon(Icons.info_outline_rounded,
-                    size: 14, color: OnboardingColors.textSecondary),
-                const SizedBox(width: 8),
+                const Icon(
+                  Icons.info_outline_rounded,
+                  size: 16,
+                  color: OnboardingColors.onSurfaceVariant,
+                ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Skip this step to start fresh with zero attendance.',
-                    style: GoogleFonts.inter(
-                        fontSize: 12, color: OnboardingColors.textSecondary),
+                    style: GoogleFonts.hankenGrotesk(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: OnboardingColors.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
           // ── Per-subject cards ─────────────────────────────────────
           if (state.importData.isEmpty)
             Center(
@@ -160,9 +169,11 @@ class _SubjectImportCardState extends State<_SubjectImportCard> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: OnboardingColors.surfaceCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: OnboardingColors.border),
+        color: OnboardingColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: OnboardingColors.outlineVariant.withValues(alpha: 0.5),
+        ),
       ),
       child: Column(
         children: [
@@ -197,10 +208,10 @@ class _SubjectImportCardState extends State<_SubjectImportCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(d.subjectName,
-                            style: GoogleFonts.inter(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: OnboardingColors.textPrimary,
+                         style: GoogleFonts.plusJakartaSans(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: OnboardingColors.onSurface,
                             )),
                         if (d.method == ImportMethod.manualCount &&
                             d.manualTotal > 0)

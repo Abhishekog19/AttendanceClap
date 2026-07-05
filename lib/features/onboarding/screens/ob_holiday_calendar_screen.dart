@@ -46,27 +46,28 @@ class _ObHolidayCalendarScreenState
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 32),
+          const SizedBox(height: 28),
           Text(
-            'Mark your\nholidays',
-            style: GoogleFonts.inter(
+            'Mark your holidays',
+            style: GoogleFonts.plusJakartaSans(
               fontSize: 28,
               fontWeight: FontWeight.w800,
-              color: OnboardingColors.textPrimary,
-              height: 1.2,
-              letterSpacing: -0.5,
+              color: OnboardingColors.onSurface,
+              height: 1.28,
+              letterSpacing: -0.28,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             'Tap any date to mark it as a holiday. Holidays are excluded from attendance calculations.',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: OnboardingColors.textSecondary,
+            style: GoogleFonts.hankenGrotesk(
+              fontSize: 16,
+              fontWeight: FontWeight.w400,
+              color: OnboardingColors.onSurfaceVariant,
               height: 1.5,
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
           // ── Month navigation ──────────────────────────────────────
           _MonthNav(
             month: _focusedMonth,
@@ -88,23 +89,26 @@ class _ObHolidayCalendarScreenState
           // ── Holiday count chip ────────────────────────────────────
           if (state.holidays.isNotEmpty) ...[
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: OnboardingColors.surface,
-                borderRadius: BorderRadius.circular(10),
+                color: OnboardingColors.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: OnboardingColors.outlineVariant.withValues(alpha: 0.5),
+                ),
               ),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.beach_access_rounded,
-                      size: 16, color: OnboardingColors.textSecondary),
+                      size: 16, color: OnboardingColors.onSurfaceVariant),
                   const SizedBox(width: 8),
                   Text(
                     '${state.holidays.length} holiday${state.holidays.length == 1 ? '' : 's'} marked',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.hankenGrotesk(
                       fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: OnboardingColors.textSecondary,
+                      fontWeight: FontWeight.w700,
+                      color: OnboardingColors.onSurface,
                     ),
                   ),
                 ],
@@ -150,10 +154,10 @@ class _MonthNav extends StatelessWidget {
           child: Center(
             child: Text(
               DateFormat('MMMM yyyy').format(month),
-              style: GoogleFonts.inter(
-                fontSize: 16,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 17,
                 fontWeight: FontWeight.w700,
-                color: OnboardingColors.textPrimary,
+                color: OnboardingColors.onSurface,
               ),
             ),
           ),
@@ -213,10 +217,10 @@ class _CalendarGrid extends StatelessWidget {
               .map((n) => Expanded(
                     child: Center(
                       child: Text(n,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.hankenGrotesk(
                             fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: OnboardingColors.textHint,
+                            fontWeight: FontWeight.w700,
+                            color: OnboardingColors.onSurfaceVariant,
                           )),
                     ),
                   ))
@@ -257,7 +261,7 @@ class _CalendarGrid extends StatelessWidget {
                     child: Center(
                       child: Text(
                         '$dayNum',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.hankenGrotesk(
                           fontSize: 13,
                           fontWeight: isHoliday || isToday
                               ? FontWeight.w700
@@ -265,8 +269,8 @@ class _CalendarGrid extends StatelessWidget {
                           color: isHoliday
                               ? Colors.white
                               : inSem
-                                  ? OnboardingColors.textPrimary
-                                  : OnboardingColors.textHint,
+                                  ? OnboardingColors.onSurface
+                                  : OnboardingColors.outline,
                         ),
                       ),
                     ),
