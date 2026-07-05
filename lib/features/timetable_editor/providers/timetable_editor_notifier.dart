@@ -79,6 +79,9 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
   StreamSubscription<Map<String, dynamic>>? _configSub;
   StreamSubscription<List<LectureBlock>>? _lecturesSub;
   Timer? _regenDebounce;
+  // Bug-3: guard against concurrent regeneration runs (e.g. debounce timer
+  // firing at the same time as flushRegeneration when Done is tapped).
+  bool _regenRunning = false;
   // Phase E: backfill runs at most once per notifier lifetime.
   bool _backfillDone = false;
 
@@ -331,19 +334,36 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
   }
 
   Future<void> _doRegen() async {
-    final lectures = state.data.lectures;
-    // Always run regeneration (even for empty lectures list) so stale future
-    // sessions are cleaned up when all lectures are removed.
-    await ref.read(timetableRepositoryProvider)
-        .regenerateFutureSessionsFromLectures(lectures: lectures);
+    // Bug-3: skip if a regen is already running to prevent duplicate writes
+    // when the debounce timer fires concurrently with a Done-button flush.
+    if (_regenRunning) return;
+    _regenRunning = true;
+    try {
+      final lectures = state.data.lectures;
+      final subjects = state.data.subjects;
+      // Always run regeneration (even for empty lectures list) so stale future
+      // sessions are cleaned up when all lectures are removed.
+      await ref.read(timetableRepositoryProvider)
+          .regenerateFutureSessionsFromLectures(
+            lectures: lectures,
+            // Pass already-loaded subjects to avoid a redundant Firestore read.
+            subjects: subjects.isEmpty ? null : subjects,
+          );
+    } finally {
+      _regenRunning = false;
+    }
   }
 
-  /// Cancels any pending debounce and immediately runs regeneration.
+  /// Cancels any pending debounce and fires regeneration in the background.
   /// Called by [EditTimetableScreen] when the user taps Done.
-  Future<void> flushRegeneration() async {
+  /// Does NOT await — navigation proceeds immediately. The debounced regen
+  /// already runs automatically on every edit, so this is just a safety
+  /// flush for any pending 1.5 s debounce that hadn't fired yet.
+  void flushRegeneration() {
     _regenDebounce?.cancel();
     _regenDebounce = null;
-    await _doRegen();
+    // Fire-and-forget: runs in background while user navigates away.
+    _doRegen();
   }
 
   // ── Conflict detection ────────────────────────────────────────────────────────

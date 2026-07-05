@@ -10,7 +10,9 @@ import '../models/class_session_model.dart';
 import '../models/daily_schedule_override_model.dart';
 import '../models/semester_model.dart';
 import '../models/timetable_entry_model.dart';
+import '../models/subject_model.dart';
 import '../../features/timetable_editor/models/timetable_editor_models.dart';
+
 
 import 'auth_repository.dart';
 
@@ -261,6 +263,14 @@ class TimetableRepository {
     required List<LectureBlock> lectures,
     required Semester semester,
   }) async {
+    // Bug-3 fix: fetch subjects so we can denormalise subjectName into each
+    // session doc.  Without this, subjectName was always '' and the Schedule
+    // page showed blank cards for every generated session.
+    final subjectList = await _ds.getSubjects(_uid);
+    final subjectNameMap = <String, String>{
+      for (final s in subjectList) s.id: s.name,
+    };
+
     final sessions = <ClassSession>[];
 
     for (final lecture in lectures) {
@@ -274,7 +284,7 @@ class TimetableRepository {
         sessions.add(ClassSession(
           id: _uuid.v4(),
           subjectId: lecture.subjectId,
-          subjectName: '', // resolved at display layer via SubjectModel
+          subjectName: subjectNameMap[lecture.subjectId] ?? '',
           date: date,
           startTime: lecture.startTime,
           endTime: lecture.endTime,
@@ -396,16 +406,18 @@ class TimetableRepository {
   /// Regenerates class_sessions for future dates from the current
   /// [LectureBlock]s + active semester.
   ///
-  /// Safe to call post-onboarding: only future unmarked sessions are wiped,
-  /// so past attendance marks are preserved.
+  /// Safe to call post-onboarding: only future [notMarked] sessions are wiped,
+  /// so past attendance history (present/absent marks) is fully preserved.
   ///
-  /// New sessions are written first; old future-unmarked sessions are deleted
-  /// only after all writes succeed. This prevents data loss if a write batch
-  /// fails mid-way.
+  /// ORDER: delete stale sessions FIRST, then write fresh ones.
+  /// Previous implementation wrote first then deleted — but the delete query
+  /// matches ALL notMarked future sessions including the ones just written,
+  /// so the old approach erased itself every time.
   ///
   /// Returns the number of sessions written, or 0 if no semester found.
   Future<int> regenerateFutureSessionsFromLectures({
     required List<LectureBlock> lectures,
+    List<SubjectModel>? subjects, // pass from notifier to avoid extra Firestore read
   }) async {
     final semester = await getActiveSemester();
     if (semester == null) return 0;
@@ -415,7 +427,19 @@ class TimetableRepository {
       DateTime.now().day,
     );
 
-    // Build new session list first (no side-effects yet)
+    // Use the provided subjects list (already loaded in Riverpod state) or
+    // fall back to a fresh Firestore fetch if none were passed.
+    final subjectList = subjects ?? await _ds.getSubjects(_uid);
+    final subjectNameMap = <String, String>{
+      for (final s in subjectList) s.id: s.name,
+    };
+
+    // ── Step 1: Delete all stale future notMarked sessions FIRST ─────────────
+    // Must happen before writing new ones so the delete query does not also
+    // wipe the freshly written sessions (they'd match the same filter).
+    await deleteFutureUnmarkedSessions();
+
+    // ── Step 2: Build and write the correct session list ─────────────────────
     final sessions = <ClassSession>[];
     for (final lecture in lectures) {
       final weekday = kDayOrder.indexOf(lecture.day) + 1;
@@ -429,7 +453,7 @@ class TimetableRepository {
         sessions.add(ClassSession(
           id: _uuid.v4(),
           subjectId: lecture.subjectId,
-          subjectName: '',
+          subjectName: subjectNameMap[lecture.subjectId] ?? '',
           date: date,
           startTime: lecture.startTime,
           endTime: lecture.endTime,
@@ -441,7 +465,6 @@ class TimetableRepository {
       }
     }
 
-    // Write new sessions first — if this throws the old data is untouched.
     const chunkSize = 500;
     for (int i = 0; i < sessions.length; i += chunkSize) {
       final chunk = sessions.skip(i).take(chunkSize).toList();
@@ -451,9 +474,6 @@ class TimetableRepository {
       }
       await batch.commit();
     }
-
-    // Only after all writes succeed, remove stale future unmarked sessions.
-    await deleteFutureUnmarkedSessions();
 
     return sessions.length;
   }

@@ -30,24 +30,12 @@ class EditTimetableScreen extends ConsumerStatefulWidget {
 }
 
 class _EditTimetableScreenState extends ConsumerState<EditTimetableScreen> {
-  bool _isSaving = false;
-
-  /// Done: flush any pending debounced session regen then pop.
-  Future<void> _onDone() async {
-    if (_isSaving) return;
-    setState(() => _isSaving = true);
-    try {
-      await ref
-          .read(timetableEditorNotifierProvider.notifier)
-          .flushRegeneration();
-    } catch (_) {
-      // Best-effort — don't block navigation on failure
-    } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-        Navigator.of(context).maybePop();
-      }
-    }
+  /// Done: flush any pending debounced session regen (fire-and-forget) then pop.
+  void _onDone() {
+    ref
+        .read(timetableEditorNotifierProvider.notifier)
+        .flushRegeneration();
+    Navigator.of(context).maybePop();
   }
 
   void _showCustomize(BuildContext context) {
@@ -76,7 +64,7 @@ class _EditTimetableScreenState extends ConsumerState<EditTimetableScreen> {
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_rounded, color: primary),
-          onPressed: _isSaving ? null : _onDone,
+          onPressed: _onDone,
           tooltip: 'Done',
         ),
         title: Text(
@@ -88,29 +76,17 @@ class _EditTimetableScreenState extends ConsumerState<EditTimetableScreen> {
           ),
         ),
         actions: [
-          if (_isSaving)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Center(
-                child: SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            )
-          else
-            TextButton(
-              onPressed: _onDone,
-              child: Text(
-                'Done',
-                style: GoogleFonts.inter(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: primary,
-                ),
+          TextButton(
+            onPressed: _onDone,
+            child: Text(
+              'Done',
+              style: GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: primary,
               ),
             ),
+          ),
         ],
       ),
       body: Column(
@@ -120,11 +96,20 @@ class _EditTimetableScreenState extends ConsumerState<EditTimetableScreen> {
             child: TimetableGrid(mode: TimetableGridMode.edit),
           ),
 
-          // Customize / settings action pinned at the bottom
+          // Customize / settings action pinned at the bottom.
+          // Bug-2: adds a subtle upward shadow so the bar reads as a proper
+          // persistent secondary action bar rather than floating over the grid.
           Container(
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF1E2028) : Colors.white,
               border: Border(top: BorderSide(color: border)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.30 : 0.08),
+                  blurRadius: 12,
+                  offset: const Offset(0, -3),
+                ),
+              ],
             ),
             child: SafeArea(
               top: false,

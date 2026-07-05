@@ -46,6 +46,9 @@ const _kCellWidth    = 90.0;
 const _kLabelWidth   = 52.0;
 const _kHeaderHeight = 48.0;
 const _kMinSnapMinutes = 15;
+// Bug-2: extra space below the last hour mark so content is never hidden
+// behind the Customize bar (or onboarding footer) when scrolled to bottom.
+const _kScrollBottomPad = 80.0;
 
 // ─── Shared pixel ↔ time conversion utilities (Phase B) ─────────────────────
 // Single source of truth — both the renderer AND every gesture handler call
@@ -303,6 +306,8 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
                   child: SingleChildScrollView(
                     controller: _vertLabelCtrl,
                     physics: const NeverScrollableScrollPhysics(),
+                    // Bug-2: extend by _kScrollBottomPad to match body scroll.
+                    padding: const EdgeInsets.only(bottom: _kScrollBottomPad),
                     child: _TimeLabelColumn(
                       hourMarks: hourMarks,
                       columnHeight: columnHeight,
@@ -317,6 +322,9 @@ class _TimetableGridState extends ConsumerState<TimetableGrid> {
                 Expanded(
                   child: SingleChildScrollView(
                     controller: _vertBodyCtrl,
+                    // Bug-2: bottom padding so the last row is scrollable
+                    // above the Customize bar / onboarding footer.
+                    padding: const EdgeInsets.only(bottom: _kScrollBottomPad),
                     child: SingleChildScrollView(
                       controller: _horizBodyCtrl,
                       scrollDirection: Axis.horizontal,
@@ -874,42 +882,42 @@ class _BlockCell extends StatelessWidget {
       blockHeight: blockHeight,
     );
 
+    Widget body;
     if (!isRevealed) {
       // Collapsed: tap → reveal.  Long-press → drag.
-      return LongPressDraggable<LectureBlock>(
-        data: lecture,
-        delay: const Duration(milliseconds: 350),
-        feedback: feedback,
-        childWhenDragging: Opacity(opacity: 0.30, child: tile),
-        onDragStarted: onDragStart,
-        onDragUpdate: (d) => onDragUpdate(d.globalPosition),
-        onDragEnd: (_) => onDragEnd(),
-        onDraggableCanceled: (_, __) => onDragCancel(),
-        child: GestureDetector(
-          onTap: onReveal,
-          behavior: HitTestBehavior.opaque,
+      body = GestureDetector(
+        onTap: onReveal,
+        behavior: HitTestBehavior.opaque,
+        child: LongPressDraggable<LectureBlock>(
+          data: lecture,
+          delay: const Duration(milliseconds: 350),
+          feedback: feedback,
+          childWhenDragging: Opacity(opacity: 0.30, child: tile),
+          onDragStarted: onDragStart,
+          onDragUpdate: (d) => onDragUpdate(d.globalPosition),
+          onDragEnd: (_) => onDragEnd(),
+          onDraggableCanceled: (_, __) => onDragCancel(),
+          child: tile,
+        ),
+      );
+    } else {
+      // Revealed: tap body → open detail sheet.  Long-press → drag.
+      body = GestureDetector(
+        onTap: onOpenSheet,
+        behavior: HitTestBehavior.opaque,
+        child: LongPressDraggable<LectureBlock>(
+          data: lecture,
+          delay: const Duration(milliseconds: 350),
+          feedback: feedback,
+          childWhenDragging: Opacity(opacity: 0.30, child: tile),
+          onDragStarted: onDragStart,
+          onDragUpdate: (d) => onDragUpdate(d.globalPosition),
+          onDragEnd: (_) => onDragEnd(),
+          onDraggableCanceled: (_, __) => onDragCancel(),
           child: tile,
         ),
       );
     }
-
-    // Revealed: tap body → open detail sheet.  Long-press → drag.
-    // The × icon GestureDetector (innermost) still wins for cross-taps.
-    Widget body = LongPressDraggable<LectureBlock>(
-      data: lecture,
-      delay: const Duration(milliseconds: 350),
-      feedback: feedback,
-      childWhenDragging: Opacity(opacity: 0.30, child: tile),
-      onDragStarted: onDragStart,
-      onDragUpdate: (d) => onDragUpdate(d.globalPosition),
-      onDragEnd: (_) => onDragEnd(),
-      onDraggableCanceled: (_, __) => onDragCancel(),
-      child: GestureDetector(
-        onTap: onOpenSheet,
-        behavior: HitTestBehavior.opaque,
-        child: tile,
-      ),
-    );
 
     // Small-block overflow: allow revealed overlay to extend beyond the
     // Positioned bounds so content isn't clipped.
@@ -932,11 +940,8 @@ class _BlockCell extends StatelessWidget {
   }
 }
 
-// ─── Lecture Block Tile ──────────────────────────────────────────────────────────────
+// ─── Lecture Block Tile ───────────────────────────────────────────────────────
 // Phase C: accepts [isRevealed] to show time range + × icon in revealed state.
-// The × icon has its OWN GestureDetector with HitTestBehavior.opaque so that
-// tapping it fires [onDelete] and does NOT propagate to the body tap handler
-// in _BlockCell (innermost GestureDetector wins in Flutter's gesture arena).
 
 class _LectureBlockTile extends StatelessWidget {
   const _LectureBlockTile({
@@ -974,102 +979,99 @@ class _LectureBlockTile extends StatelessWidget {
       bottomRight: suppressBottom ? Radius.zero : const Radius.circular(5),
     );
 
-    return Container(
-      decoration: BoxDecoration(
-        // Revealed: slightly brighter fill to signal the active state.
-        color: isRevealed
-            ? color.withValues(alpha: 0.97)
-            : color.withValues(alpha: 0.88),
-        borderRadius: borderRadius,
-        border: hasConflict
-            ? Border.all(color: Colors.red.shade400, width: 1.5)
-            : Border(
-                top:   BorderSide(color: color, width: 1),
-                left:  BorderSide(color: color.withValues(alpha: 0.6), width: 0.5),
-                right: BorderSide(color: color.withValues(alpha: 0.6), width: 0.5),
-                bottom: suppressBottom
-                    ? BorderSide.none
-                    : BorderSide(color: color.withValues(alpha: 0.6), width: 0.5),
-              ),
-      ),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          // ── Content: name + time range ──────────────────────────────────────
-          Padding(
-            // Right padding widens to make room for × when revealed
-            padding: EdgeInsets.fromLTRB(5, 4, isRevealed ? 18 : 5, 2),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  subject?.effectiveShortName ?? '?',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: textColor,
-                    height: 1.1,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                // In revealed state: always show time range.
-                // In collapsed state: show only if block >= 30 min tall.
-                if (isRevealed || lecture.durationMinutes >= 30)
+    // SizedBox.expand() forces this widget to fill the Positioned block's
+    // tight constraints. Without it, Container (no explicit height) +
+    // Stack (loosens constraints → minHeight=0) + Column(max) would collapse
+    // the Column to zero height, making the text invisible while the
+    // DecoratedBox background still showed (explaining the "colored but blank" bug).
+    return SizedBox.expand(
+      child: Container(
+        decoration: BoxDecoration(
+          color: isRevealed
+              ? color.withValues(alpha: 0.95)
+              : color.withValues(alpha: 0.88),
+          borderRadius: borderRadius,
+          // IMPORTANT: borderRadius requires a uniform-colored Border.
+          // Using different colors per side throws at paint time → blank tile.
+          border: hasConflict
+              ? Border.all(color: Colors.red.shade400, width: 1.5)
+              : Border.all(color: color.withValues(alpha: 0.5), width: 0.5),
+        ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // ── Subject name + time range ──────────────────────────────────
+            Padding(
+              padding: EdgeInsets.fromLTRB(5, 4, isRevealed ? 18 : 5, 2),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                // mainAxisSize.min: Stack loosens constraints (minHeight → 0),
+                // so expanding would collapse to 0. SizedBox.expand() fills
+                // the block; Column just wraps its content.
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Subject short name — always shown.
                   Text(
-                    '${lecture.startTime}–${lecture.endTime}',
-                    style: GoogleFonts.inter(
-                      fontSize: 9,
-                      color: dimText,
-                      height: 1.3,
+                    subject?.effectiveShortName ?? '?',
+                    style: TextStyle(
+                      fontFamily: 'Roboto',
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: textColor,
+                      height: 1.1,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-              ],
-            ),
-          ),
-
-          // ── Conflict warning icon (only in collapsed state) ─────────────────
-          // In revealed state the × icon takes this corner instead.
-          if (hasConflict && !isRevealed)
-            Positioned(
-              top: 3,
-              right: 3,
-              child: Icon(
-                Icons.warning_amber_rounded,
-                size: 10,
-                color: Colors.red.shade300,
+                  // Time range — shown when block >= 30 min or when revealed.
+                  if (isRevealed || lecture.durationMinutes >= 30)
+                    Text(
+                      '${lecture.startTime}–${lecture.endTime}',
+                      style: TextStyle(
+                        fontFamily: 'Roboto',
+                        fontSize: 9,
+                        color: dimText,
+                        height: 1.3,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
               ),
             ),
 
-          // ── Revealed: × delete button ─────────────────────────────────────
-          // Innermost GestureDetector: wins the gesture arena, so this tap
-          // NEVER also triggers the block-body tap handler in _BlockCell.
-          if (isRevealed)
-            Positioned(
-              top: 2,
-              right: 2,
-              child: GestureDetector(
-                onTap: onDelete,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 16,
-                  height: 16,
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.close_rounded,
-                    size: 11,
-                    color: dimText,
+            // ── Conflict icon ───────────────────────────────────────────────
+            if (hasConflict && !isRevealed)
+              Positioned(
+                top: 3,
+                right: 3,
+                child: Icon(Icons.warning_amber_rounded,
+                    size: 10, color: Colors.red.shade300),
+              ),
+
+            // ── × delete button (revealed only) ────────────────────────────
+            if (isRevealed)
+              Positioned(
+                top: 2,
+                right: 2,
+                child: GestureDetector(
+                  onTap: onDelete,
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 16,
+                    height: 16,
+                    alignment: Alignment.center,
+                    child: Icon(Icons.close_rounded, size: 11, color: dimText),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
+
 
 /// The floating widget that follows the finger during a drag.
 /// Rendered at 1.03× scale with elevation shadow to give a "lifted" feel.
