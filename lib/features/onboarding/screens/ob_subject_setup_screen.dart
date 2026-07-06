@@ -24,27 +24,28 @@ class ObSubjectSetupScreen extends ConsumerWidget {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 32),
+          const SizedBox(height: 28),
           Text(
-            'Add your\nsubjects',
-            style: GoogleFonts.inter(
+            'Your Subjects',
+            style: GoogleFonts.plusJakartaSans(
               fontSize: 28,
               fontWeight: FontWeight.w800,
-              color: OnboardingColors.textPrimary,
-              height: 1.2,
-              letterSpacing: -0.5,
+              color: OnboardingColors.onBackground,
+              height: 1.28,
+              letterSpacing: -0.28,
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Add all the subjects you\'re enrolled in. You can set individual attendance targets for each one.',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: OnboardingColors.textSecondary,
+            'Let\'s set up your classes and attendance goals.',
+            style: GoogleFonts.hankenGrotesk(
+              fontSize: 16,
+              fontWeight: FontWeight.w400,
+              color: OnboardingColors.onSurfaceVariant,
               height: 1.5,
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 28),
           // ── Subject list ────────────────────────────────────────────
           if (state.subjects.isEmpty)
             _EmptySubjectState(
@@ -130,81 +131,118 @@ class _SubjectCard extends StatelessWidget {
         'FF${subject.effectiveColorHex.replaceAll('#', '')}',
         radix: 16));
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: OnboardingColors.surfaceCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: OnboardingColors.border),
+        color: OnboardingColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: OnboardingColors.outlineVariant.withValues(alpha: 0.5),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      child: Row(
+      child: Stack(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
-            ),
-            child: Center(
-              child: Text(
-                subject.effectiveShortName,
-                style: GoogleFonts.inter(
-                  fontWeight: FontWeight.w800,
-                  color: color,
-                  fontSize: 13,
+          // Left color accent bar
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            child: Container(
+              width: 5,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  bottomLeft: Radius.circular(20),
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 12, 14),
+            child: Row(
               children: [
-                Text(subject.name,
-                    style: GoogleFonts.inter(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: OnboardingColors.textPrimary,
-                    )),
-                if (subject.faculty != null && subject.faculty!.isNotEmpty)
-                  Text(subject.faculty!,
-                      style: GoogleFonts.inter(
+                // Avatar
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Center(
+                    child: Text(
+                      subject.effectiveShortName,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontWeight: FontWeight.w800,
+                        color: color,
                         fontSize: 12,
-                        color: OnboardingColors.textSecondary,
-                      )),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Name + faculty
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        subject.name,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: OnboardingColors.onSurface,
+                        ),
+                      ),
+                      if (subject.faculty != null && subject.faculty!.isNotEmpty)
+                        Text(
+                          subject.faculty!,
+                          style: GoogleFonts.hankenGrotesk(
+                            fontSize: 12,
+                            color: OnboardingColors.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                // Target badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: OnboardingColors.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${target.round()}%',
+                    style: GoogleFonts.hankenGrotesk(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: OnboardingColors.onSurface,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.edit_rounded, size: 18),
+                  color: OnboardingColors.onSurfaceVariant,
+                  onPressed: onEdit,
+                  visualDensity: VisualDensity.compact,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  color: OnboardingColors.error,
+                  onPressed: onDelete,
+                  visualDensity: VisualDensity.compact,
+                ),
               ],
             ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: OnboardingColors.surface,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(
-              '${target.round()}%',
-              style: GoogleFonts.inter(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: OnboardingColors.textPrimary,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          IconButton(
-            icon: const Icon(Icons.edit_rounded,
-                size: 18, color: OnboardingColors.textSecondary),
-            onPressed: onEdit,
-            visualDensity: VisualDensity.compact,
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline_rounded,
-                size: 18, color: OnboardingColors.error),
-            onPressed: onDelete,
-            visualDensity: VisualDensity.compact,
           ),
         ],
       ),
@@ -222,31 +260,46 @@ class _EmptySubjectState extends StatelessWidget {
       onTap: onAdd,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 36),
+        padding: const EdgeInsets.symmetric(vertical: 40),
         decoration: BoxDecoration(
-          color: OnboardingColors.surface,
-          borderRadius: BorderRadius.circular(16),
+          color: OnboardingColors.surfaceContainerLowest,
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(
-              color: OnboardingColors.border,
-              style: BorderStyle.solid),
+            color: OnboardingColors.outlineVariant.withValues(alpha: 0.4),
+          ),
         ),
         child: Column(
           children: [
-            const Icon(Icons.add_circle_outline_rounded,
-                size: 40, color: OnboardingColors.textHint),
-            const SizedBox(height: 12),
-            Text('Add your first subject',
-                style: GoogleFonts.inter(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: OnboardingColors.textPrimary,
-                )),
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: OnboardingColors.surfaceContainer,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.add_rounded,
+                size: 28,
+                color: OnboardingColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Add your first subject',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: OnboardingColors.onSurface,
+              ),
+            ),
             const SizedBox(height: 4),
-            Text('Tap to get started',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: OnboardingColors.textSecondary,
-                )),
+            Text(
+              'Tap to get started',
+              style: GoogleFonts.hankenGrotesk(
+                fontSize: 14,
+                color: OnboardingColors.onSurfaceVariant,
+              ),
+            ),
           ],
         ),
       ),
@@ -265,22 +318,29 @@ class _AddSubjectButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14),
         decoration: BoxDecoration(
-          color: OnboardingColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: OnboardingColors.border),
+          color: OnboardingColors.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: OnboardingColors.outlineVariant.withValues(alpha: 0.4),
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.add_rounded,
-                size: 20, color: OnboardingColors.textPrimary),
+            const Icon(
+              Icons.add_rounded,
+              size: 20,
+              color: OnboardingColors.onSurface,
+            ),
             const SizedBox(width: 8),
-            Text('Add Subject',
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: OnboardingColors.textPrimary,
-                )),
+            Text(
+              'Add Another Subject',
+              style: GoogleFonts.hankenGrotesk(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: OnboardingColors.onSurface,
+              ),
+            ),
           ],
         ),
       ),
@@ -335,12 +395,12 @@ class _SubjectSheetState extends State<_SubjectSheet> {
     final isEdit = widget.existing != null;
 
     return Container(
-      decoration: const BoxDecoration(
-        color: OnboardingColors.bg,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: OnboardingColors.background,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       ),
       padding: EdgeInsets.fromLTRB(
-          24, 20, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+          20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 28),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -351,7 +411,7 @@ class _SubjectSheetState extends State<_SubjectSheet> {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: OnboardingColors.border,
+                color: OnboardingColors.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -359,10 +419,10 @@ class _SubjectSheetState extends State<_SubjectSheet> {
           const SizedBox(height: 20),
           Text(
             isEdit ? 'Edit Subject' : 'Add Subject',
-            style: GoogleFonts.inter(
-              fontSize: 20,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 22,
               fontWeight: FontWeight.w700,
-              color: OnboardingColors.textPrimary,
+              color: OnboardingColors.onSurface,
             ),
           ),
           const SizedBox(height: 20),
@@ -381,10 +441,10 @@ class _SubjectSheetState extends State<_SubjectSheet> {
           // ── Color picker ──────────────────────────────────────────
           Text(
             'Color',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.hankenGrotesk(
               fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: OnboardingColors.textPrimary,
+              fontWeight: FontWeight.w700,
+              color: OnboardingColors.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 10),
@@ -433,12 +493,14 @@ class _SubjectSheetState extends State<_SubjectSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Custom Attendance Target',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: OnboardingColors.textPrimary,
-                  )),
+              Text(
+                'Custom Attendance Target',
+                style: GoogleFonts.hankenGrotesk(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: OnboardingColors.onSurface,
+                ),
+              ),
               Switch(
                 value: _useCustomTarget,
                 onChanged: (v) =>
@@ -491,14 +553,15 @@ class _SubjectSheetState extends State<_SubjectSheet> {
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 'Using global target: ${widget.globalGoal.round()}%',
-                style: GoogleFonts.inter(
-                    fontSize: 12, color: OnboardingColors.textSecondary),
+                style: GoogleFonts.hankenGrotesk(
+                  fontSize: 12,
+                  color: OnboardingColors.onSurfaceVariant,
+                ),
               ),
             ),
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
-            height: 48,
             child: ElevatedButton(
               onPressed: () async {
                 if (_nameCtrl.text.trim().isEmpty) return;
@@ -540,13 +603,17 @@ class _SubjectSheetState extends State<_SubjectSheet> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: OnboardingColors.primary,
                 foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                elevation: 2,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: const StadiumBorder(),
               ),
-              child: Text(isEdit ? 'Save Changes' : 'Add Subject',
-                  style: GoogleFonts.inter(
-                      fontSize: 15, fontWeight: FontWeight.w600)),
+              child: Text(
+                isEdit ? 'Save Changes' : 'Add Subject',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ),
         ],
@@ -567,39 +634,49 @@ class _SheetField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: OnboardingColors.textPrimary,
-            )),
+        Text(
+          label,
+          style: GoogleFonts.hankenGrotesk(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: OnboardingColors.onSurfaceVariant,
+          ),
+        ),
         const SizedBox(height: 8),
         TextField(
           controller: controller,
-          style: GoogleFonts.inter(
-              fontSize: 15, color: OnboardingColors.textPrimary),
+          style: GoogleFonts.hankenGrotesk(
+            fontSize: 16,
+            color: OnboardingColors.onSurface,
+          ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: GoogleFonts.inter(
-                fontSize: 15, color: OnboardingColors.textHint),
+            hintStyle: GoogleFonts.hankenGrotesk(
+              fontSize: 16,
+              color: OnboardingColors.outline,
+            ),
             filled: true,
-            fillColor: OnboardingColors.surface,
+            fillColor: OnboardingColors.surfaceContainerLowest,
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide:
-                  const BorderSide(color: OnboardingColors.border),
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: OnboardingColors.outlineVariant.withValues(alpha: 0.4),
+              ),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide:
-                  const BorderSide(color: OnboardingColors.border),
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: OnboardingColors.outlineVariant.withValues(alpha: 0.4),
+              ),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               borderSide: const BorderSide(
-                  color: OnboardingColors.borderFocus, width: 1.5),
+                color: OnboardingColors.primary,
+                width: 1.5,
+              ),
             ),
           ),
         ),

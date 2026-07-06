@@ -1,29 +1,79 @@
 import 'package:flutter/material.dart';
 
-/// Onboarding-specific monochrome color palette.
-/// The Stitch reference explicitly labels all screens "Monochrome" —
-/// pure black/white with mid-grey accents.
+/// Onboarding color palette — exact Stitch Material-3 monochrome tokens.
+/// Primary = #000000 (pure black), background = #F9F9F9.
 class OnboardingColors {
   OnboardingColors._();
 
-  static const Color bg = Color(0xFFFFFFFF);
-  static const Color surface = Color(0xFFF5F5F5);
-  static const Color surfaceCard = Color(0xFFFFFFFF);
-  static const Color primary = Color(0xFF111111);
-  static const Color primaryVariant = Color(0xFF222222);
-  static const Color textPrimary = Color(0xFF111111);
-  static const Color textSecondary = Color(0xFF666666);
-  static const Color textHint = Color(0xFF999999);
-  static const Color divider = Color(0xFFE5E5E5);
-  static const Color border = Color(0xFFDDDDDD);
-  static const Color borderFocus = Color(0xFF111111);
-  static const Color chipSelected = Color(0xFF111111);
-  static const Color chipUnselected = Color(0xFFF0F0F0);
-  static const Color chipSelectedText = Color(0xFFFFFFFF);
-  static const Color chipUnselectedText = Color(0xFF444444);
-  static const Color error = Color(0xFFB91C1C);
-  static const Color success = Color(0xFF15803D);
-  static const Color progressBg = Color(0xFFE5E5E5);
-  static const Color progressFill = Color(0xFF111111);
-  static const Color skipBtn = Color(0xFF888888);
+  // ── Backgrounds & Surfaces ───────────────────────────────────────────────
+  static const Color background             = Color(0xFFF9F9F9);
+  static const Color surface               = Color(0xFFF9F9F9);
+  static const Color surfaceBright         = Color(0xFFF9F9F9);
+  static const Color surfaceContainerLowest = Color(0xFFFFFFFF);
+  static const Color surfaceContainerLow   = Color(0xFFF3F3F3);
+  static const Color surfaceContainer      = Color(0xFFEEEEEE);
+  static const Color surfaceContainerHigh  = Color(0xFFE8E8E8);
+  static const Color surfaceContainerHighest = Color(0xFFE2E2E2);
+  static const Color surfaceDim            = Color(0xFFDADADA);
+  static const Color surfaceVariant        = Color(0xFFE2E2E2);
+
+  // ── Primary ──────────────────────────────────────────────────────────────
+  static const Color primary               = Color(0xFF000000);
+  static const Color onPrimary             = Color(0xFFFFFFFF);
+  static const Color primaryContainer      = Color(0xFF1B1B1B);
+  static const Color onPrimaryContainer    = Color(0xFF848484);
+  static const Color primaryFixed          = Color(0xFFE2E2E2);
+  static const Color primaryFixedDim       = Color(0xFFC6C6C6);
+  static const Color inversePrimary        = Color(0xFFC6C6C6);
+
+  // ── Secondary ────────────────────────────────────────────────────────────
+  static const Color secondary             = Color(0xFF5E5E5E);
+  static const Color onSecondary           = Color(0xFFFFFFFF);
+  static const Color secondaryContainer    = Color(0xFFE2E2E2);
+  static const Color onSecondaryContainer  = Color(0xFF646464);
+
+  // ── Tertiary ─────────────────────────────────────────────────────────────
+  static const Color tertiary              = Color(0xFF000000);
+  static const Color onTertiary            = Color(0xFFFFFFFF);
+  static const Color tertiaryContainer     = Color(0xFF1B1B1B);
+  static const Color onTertiaryContainer   = Color(0xFF848484);
+  static const Color tertiaryFixed         = Color(0xFFE2E2E2);
+
+  // ── On-surface ───────────────────────────────────────────────────────────
+  static const Color onBackground          = Color(0xFF1B1B1B);
+  static const Color onSurface            = Color(0xFF1B1B1B);
+  static const Color onSurfaceVariant     = Color(0xFF4C4546);
+
+  // ── Outline ──────────────────────────────────────────────────────────────
+  static const Color outline              = Color(0xFF7E7576);
+  static const Color outlineVariant       = Color(0xFFCFC4C5);
+
+  // ── Inverse ──────────────────────────────────────────────────────────────
+  static const Color inverseSurface       = Color(0xFF303030);
+  static const Color inverseOnSurface     = Color(0xFFF1F1F1);
+
+  // ── Error ────────────────────────────────────────────────────────────────
+  static const Color error                = Color(0xFFBA1A1A);
+  static const Color onError              = Color(0xFFFFFFFF);
+  static const Color errorContainer       = Color(0xFFFFDAD6);
+  static const Color onErrorContainer     = Color(0xFF93000A);
+
+  // ── Legacy short-name aliases ─────────────────────────────────────────
+  static const Color bg                   = background;
+  static const Color surfaceCard          = surfaceContainerLowest;
+  static const Color textPrimary          = onSurface;
+  static const Color textSecondary        = onSurfaceVariant;
+  static const Color textHint             = outline;
+  static const Color divider              = outlineVariant;
+  static const Color border               = outlineVariant;
+  static const Color borderFocus          = primary;
+  static const Color chipSelected         = primary;
+  static const Color chipUnselected       = surfaceContainer;
+  static const Color chipSelectedText     = onPrimary;
+  static const Color chipUnselectedText   = onSurface;
+  static const Color progressBg           = surfaceContainerHighest;
+  static const Color progressFill         = primary;
+  static const Color skipBtn              = onSurfaceVariant;
+  static const Color primaryVariant       = Color(0xFF222222);
+  static const Color success              = Color(0xFF15803D);
 }

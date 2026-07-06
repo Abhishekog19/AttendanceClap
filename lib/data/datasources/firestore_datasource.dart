@@ -415,6 +415,7 @@ class FirestoreDatasource {
           .doc('config')
           .collection('lectures'),
     );
+  } // end deleteAllTimetableData
 
   Future<void> _deleteCollection(
       CollectionReference<Map<String, dynamic>> col) async {

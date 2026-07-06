@@ -4,8 +4,11 @@ import 'onboarding_colors.dart';
 import 'onboarding_progress_bar.dart';
 
 /// Reusable scaffold for all onboarding screens.
-/// Applies the Monochrome theme (white background, black CTAs) and
-/// hosts the progress bar, back button, optional Skip button, and CTA slot.
+/// Matches the Stitch Monochrome design:
+/// - White/near-white background (#F9F9F9)
+/// - Header: [back-button-circle] [linear-progress-bar] [step-label]
+/// - Body: scrollable with 20px horizontal padding
+/// - Bottom: Fixed black pill CTA button
 class OnboardingScaffold extends StatelessWidget {
   const OnboardingScaffold({
     super.key,
@@ -43,37 +46,64 @@ class OnboardingScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: OnboardingColors.bg,
+      backgroundColor: OnboardingColors.background,
       body: SafeArea(
         child: Column(
           children: [
-            // ── Top bar ───────────────────────────────────────────────
-            _TopBar(
-              showBack: showBack,
-              onBack: onBack ?? () => Navigator.of(context).maybePop(),
-              showSkip: showSkip,
-              onSkip: onSkip,
-              skipLabel: skipLabel,
-            ),
-            // ── Progress bar ──────────────────────────────────────────
+            // ── Header: back button + progress bar + step label ──────────
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: OnboardingProgressBar(
-                currentStep: stepIndex,
-                totalSteps: totalSteps,
+              padding: const EdgeInsets.fromLTRB(16, 12, 20, 0),
+              child: Row(
+                children: [
+                  if (showBack)
+                    _CircleBackButton(onBack: onBack ?? () => Navigator.of(context).maybePop())
+                  else
+                    const SizedBox(width: 40),
+                  const SizedBox(width: 12),
+                  // Progress bar
+                  Expanded(
+                    child: OnboardingProgressBar(
+                      currentStep: stepIndex,
+                      totalSteps: totalSteps,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Step label or skip
+                  if (showSkip)
+                    GestureDetector(
+                      onTap: onSkip,
+                      child: Text(
+                        skipLabel,
+                        style: GoogleFonts.hankenGrotesk(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: OnboardingColors.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  else
+                    Text(
+                      '${stepIndex + 1} of $totalSteps',
+                      style: GoogleFonts.hankenGrotesk(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: OnboardingColors.onSurfaceVariant,
+                      ),
+                    ),
+                ],
               ),
             ),
-            const SizedBox(height: 8),
-            // ── Body (scrollable) ─────────────────────────────────────
+            const SizedBox(height: 4),
+            // ── Body (scrollable) ─────────────────────────────────────────
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: body,
               ),
             ),
-            // ── Bottom CTA ────────────────────────────────────────────
+            // ── Bottom CTA ────────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
               child: cta,
             ),
           ],
@@ -83,51 +113,28 @@ class OnboardingScaffold extends StatelessWidget {
   }
 }
 
-// ─── Top Bar ──────────────────────────────────────────────────────────────────
+// ─── Circle Back Button ────────────────────────────────────────────────────────
 
-class _TopBar extends StatelessWidget {
-  const _TopBar({
-    required this.showBack,
-    required this.onBack,
-    required this.showSkip,
-    required this.onSkip,
-    required this.skipLabel,
-  });
-
-  final bool showBack;
+class _CircleBackButton extends StatelessWidget {
+  const _CircleBackButton({required this.onBack});
   final VoidCallback onBack;
-  final bool showSkip;
-  final VoidCallback? onSkip;
-  final String skipLabel;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Row(
-        children: [
-          if (showBack)
-            IconButton(
-              icon: const Icon(Icons.arrow_back,
-                  color: OnboardingColors.primary, size: 22),
-              onPressed: onBack,
-            )
-          else
-            const SizedBox(width: 48),
-          const Spacer(),
-          if (showSkip)
-            TextButton(
-              onPressed: onSkip,
-              child: Text(
-                skipLabel,
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: OnboardingColors.skipBtn,
-                ),
-              ),
-            ),
-        ],
+    return GestureDetector(
+      onTap: onBack,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: const BoxDecoration(
+          color: OnboardingColors.surfaceContainerHighest,
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          Icons.arrow_back_rounded,
+          color: OnboardingColors.onSurface,
+          size: 20,
+        ),
       ),
     );
   }
@@ -135,7 +142,10 @@ class _TopBar extends StatelessWidget {
 
 // ─── Primary CTA Button ───────────────────────────────────────────────────────
 
-/// Full-width black CTA button used on all onboarding screens.
+/// Full-width black pill CTA button — matches Stitch design exactly.
+/// Font: Plus Jakarta Sans 24px / weight 700 (headline-md)
+/// Shape: rounded-full (stadium pill)
+/// Trailing icon: arrow_forward
 class OnboardingCTAButton extends StatelessWidget {
   const OnboardingCTAButton({
     super.key,
@@ -143,49 +153,70 @@ class OnboardingCTAButton extends StatelessWidget {
     required this.onPressed,
     this.isLoading = false,
     this.enabled = true,
+    this.showArrow = true,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool isLoading;
   final bool enabled;
+  final bool showArrow;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      height: 52,
-      child: ElevatedButton(
-        // Use a no-op when loading so the button keeps primary styling (not
-        // the disabled style). Taps are silently swallowed while isLoading.
-        onPressed: !enabled ? null : (isLoading ? () {} : onPressed),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: OnboardingColors.primary,
-          foregroundColor: Colors.white,
-          disabledBackgroundColor: OnboardingColors.border,
-          disabledForegroundColor: OnboardingColors.textHint,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+      child: AnimatedScale(
+        scale: 1.0,
+        duration: const Duration(milliseconds: 100),
+        child: ElevatedButton(
+          onPressed: !enabled ? null : (isLoading ? () {} : onPressed),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: OnboardingColors.primary,
+            foregroundColor: OnboardingColors.onPrimary,
+            disabledBackgroundColor: OnboardingColors.surfaceContainerHighest,
+            disabledForegroundColor: OnboardingColors.outline,
+            elevation: 4,
+            shadowColor: Colors.black26,
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            shape: const StadiumBorder(),
           ),
+          child: isLoading
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: Colors.white,
+                  ),
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: enabled
+                            ? OnboardingColors.onPrimary
+                            : OnboardingColors.outline,
+                      ),
+                    ),
+                    if (showArrow) ...[
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.arrow_forward_rounded,
+                        size: 22,
+                        color: enabled
+                            ? OnboardingColors.onPrimary
+                            : OnboardingColors.outline,
+                      ),
+                    ],
+                  ],
+                ),
         ),
-        child: isLoading
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: Colors.white,
-                ),
-              )
-            : Text(
-                label,
-                style: GoogleFonts.inter(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.1,
-                ),
-              ),
       ),
     );
   }
