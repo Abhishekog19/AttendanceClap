@@ -1013,8 +1013,7 @@ class _LectureBlockTile extends StatelessWidget {
                   // Subject short name — always shown.
                   Text(
                     subject?.effectiveShortName ?? '?',
-                    style: TextStyle(
-                      fontFamily: 'Roboto',
+                    style: GoogleFonts.inter(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
                       color: textColor,
@@ -1027,8 +1026,7 @@ class _LectureBlockTile extends StatelessWidget {
                   if (isRevealed || lecture.durationMinutes >= 30)
                     Text(
                       '${lecture.startTime}–${lecture.endTime}',
-                      style: TextStyle(
-                        fontFamily: 'Roboto',
+                      style: GoogleFonts.inter(
                         fontSize: 9,
                         color: dimText,
                         height: 1.3,

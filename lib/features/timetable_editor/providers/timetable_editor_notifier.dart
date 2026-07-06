@@ -10,6 +10,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
 
@@ -82,6 +83,7 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
   // Bug-3: guard against concurrent regeneration runs (e.g. debounce timer
   // firing at the same time as flushRegeneration when Done is tapped).
   bool _regenRunning = false;
+  bool _regenPending = false;
   // Phase E: backfill runs at most once per notifier lifetime.
   bool _backfillDone = false;
 
@@ -330,25 +332,47 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
   /// Rapid-fire placements only trigger one regeneration.
   void _scheduleRegen() {
     _regenDebounce?.cancel();
-    _regenDebounce = Timer(const Duration(milliseconds: 1500), _doRegen);
+    _regenDebounce = Timer(
+      const Duration(milliseconds: 1500),
+      () => unawaited(
+        _doRegen().catchError((Object e, StackTrace s) {
+          // Log but do not rethrow — a background regen failure is
+          // non-fatal and must not surface as an unhandled zone error.
+          // ignore: avoid_print
+          debugPrint('[TimetableEditor] background regen failed: $e\n$s');
+        }),
+      ),
+    );
   }
 
+  /// Runs one regeneration cycle, serialising concurrent calls.
+  /// Uses class-level [_regenRunning] / [_regenPending] guards so that
+  /// if a cycle is already in flight the next caller simply sets the
+  /// pending flag and the loop re-runs after the current Firestore
+  /// write completes.
   Future<void> _doRegen() async {
-    // Bug-3: skip if a regen is already running to prevent duplicate writes
-    // when the debounce timer fires concurrently with a Done-button flush.
-    if (_regenRunning) return;
+    if (_regenRunning) {
+      _regenPending = true;
+      return;
+    }
     _regenRunning = true;
     try {
-      final lectures = state.data.lectures;
-      final subjects = state.data.subjects;
-      // Always run regeneration (even for empty lectures list) so stale future
-      // sessions are cleaned up when all lectures are removed.
-      await ref.read(timetableRepositoryProvider)
-          .regenerateFutureSessionsFromLectures(
-            lectures: lectures,
-            // Pass already-loaded subjects to avoid a redundant Firestore read.
-            subjects: subjects.isEmpty ? null : subjects,
-          );
+      do {
+        _regenPending = false;
+        final lectures = state.data.lectures;
+        final subjects = state.data.subjects;
+        await ref
+            .read(timetableRepositoryProvider)
+            .regenerateFutureSessionsFromLectures(
+              lectures: lectures,
+              subjects: subjects.isEmpty ? null : subjects,
+            );
+      } while (_regenPending);
+    } catch (e, s) {
+      // Rethrow so callers (unawaited + catchError) can log it.
+      // ignore: avoid_print
+      debugPrint('[TimetableEditor] _doRegen error: $e\n$s');
+      rethrow;
     } finally {
       _regenRunning = false;
     }
@@ -356,14 +380,18 @@ class TimetableEditorNotifier extends _$TimetableEditorNotifier {
 
   /// Cancels any pending debounce and fires regeneration in the background.
   /// Called by [EditTimetableScreen] when the user taps Done.
-  /// Does NOT await — navigation proceeds immediately. The debounced regen
-  /// already runs automatically on every edit, so this is just a safety
-  /// flush for any pending 1.5 s debounce that hadn't fired yet.
+  /// Does NOT await — navigation proceeds immediately. Errors are caught
+  /// and logged so they cannot surface as unhandled zone errors after
+  /// the widget tree has already navigated away.
   void flushRegeneration() {
     _regenDebounce?.cancel();
     _regenDebounce = null;
-    // Fire-and-forget: runs in background while user navigates away.
-    _doRegen();
+    unawaited(
+      _doRegen().catchError((Object e, StackTrace s) {
+        // ignore: avoid_print
+        debugPrint('[TimetableEditor] flushRegeneration error: $e\n$s');
+      }),
+    );
   }
 
   // ── Conflict detection ────────────────────────────────────────────────────────
