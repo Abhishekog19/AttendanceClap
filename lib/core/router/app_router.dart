@@ -3,9 +3,6 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../features/auth/screens/login_screen.dart';
-import '../../features/auth/screens/signup_screen.dart';
-import '../../features/auth/screens/forgot_password_screen.dart';
 import '../../features/dashboard/screens/dashboard_screen.dart';
 import '../../features/subjects/screens/subjects_screen.dart';
 import '../../features/subjects/screens/add_edit_subject_screen.dart';
@@ -16,7 +13,6 @@ import '../../features/premium/screens/premium_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
 import '../../features/subjects/screens/subject_detail_screen.dart';
 import '../../features/attendance/screens/attendance_history_screen.dart';
-import '../../data/repositories/auth_repository.dart';
 import '../../features/notifications/screens/notification_settings_screen.dart';
 import '../../features/notifications/screens/notification_center_screen.dart';
 import '../../shared/widgets/main_shell.dart';
@@ -32,77 +28,77 @@ import '../../features/onboarding/screens/ob_attendance_import_screen.dart';
 import '../../features/onboarding/screens/ob_review_screen.dart';
 import '../../features/onboarding/screens/ob_success_screen.dart';
 import '../../features/onboarding/providers/onboarding_state.dart';
-// ─── Timetable Editor (new grid-based editor) ─────────────────────────────────
+
+// ─── Timetable Editor ─────────────────────────────────────────────────────────
 import '../../features/timetable_editor/screens/ob_timetable_grid_screen.dart';
 import '../../features/timetable_editor/screens/edit_timetable_screen.dart';
 
+// ─── Lifecycle state (replaces auth gate) ────────────────────────────────────
+import 'app_lifecycle_state.dart';
+
 part 'app_router.g.dart';
+
+// ── Route constants ───────────────────────────────────────────────────────────
+
+/// Routes that are part of the onboarding flow.
+/// The router uses this to decide whether an onboarding-state user is already
+/// in the right place or needs a redirect.
+const _onboardingRoutePrefix = '/onboarding';
+
+/// Route to send users who have completed onboarding but have no active semester.
+const _semesterSetupRoute = '/timetable/semester-setup';
+
+/// Default destination for fully-ready users arriving on an ambiguous route.
+const _dashboardRoute = '/dashboard';
+
+// ── Router provider ───────────────────────────────────────────────────────────
 
 @riverpod
 GoRouter appRouter(Ref ref) {
-  final authState = ref.watch(authStateChangesProvider);
-
-  // Watch the current user profile to gate onboarding.
-  // UserModel.onboardingComplete == false → redirect to onboarding.
-  // Using valueOrNull so that while the profile is loading we return null
-  // (no redirect) and the router stays put without flashing.
-  final currentUser = ref.watch(currentUserProfileProvider).valueOrNull;
+  // Watch the lifecycle state stream. The router rebuilds whenever the state
+  // changes (e.g. after onboarding completes or a semester is created).
+  final lifecycleAsync = ref.watch(appLifecycleStateProvider);
 
   return GoRouter(
-    initialLocation: '/dashboard',
+    initialLocation: _dashboardRoute,
     redirect: (context, state) {
-      // While Firebase auth is still resolving, don't redirect at all.
-      // authState.isLoading is true during the initial stream evaluation.
-      if (authState.isLoading) return null;
+      // ── While the settings row is still loading, don't redirect. ─────────
+      // AsyncLoading / AsyncError → hold position; app will rebuild when data
+      // arrives. This prevents a flash to the wrong screen on cold start.
+      if (lifecycleAsync.isLoading || lifecycleAsync.hasError) return null;
 
-      final isLoggedIn = authState.valueOrNull != null;
+      final lifecycle = lifecycleAsync.requireValue;
       final loc = state.matchedLocation;
-      final isAuthRoute = loc.startsWith('/auth');
-      final isOnboardingRoute = loc.startsWith('/onboarding');
+      final isOnboarding = loc.startsWith(_onboardingRoutePrefix);
 
-      // Not logged in → send to login (unless already on auth route)
-      if (!isLoggedIn && !isAuthRoute) return '/auth/login';
+      // ── Single state machine switch ───────────────────────────────────────
+      return switch (lifecycle) {
 
-      // Logged in + on an auth page → check onboarding status
-      if (isLoggedIn && isAuthRoute) {
-        // Profile still loading — stay on auth screen until it resolves
-        if (currentUser == null) return null;
-        if (!currentUser.onboardingComplete) {
-          // Resume at next step after the last completed one, or start at welcome
-          final saved = currentUser.onboardingStep;
-          final step = saved != null
-              ? (OnboardingStep.nextStep(saved) ?? OnboardingStep.welcome)
-              : OnboardingStep.welcome;
-          return OnboardingStep.routeFor(step);
-        }
-        return '/dashboard';
-      }
+        // Booting: never redirect — wait for the next emission.
+        AppLifecycleBooting() => null,
 
-      // Logged in + not on auth — enforce onboarding gate
-      if (isLoggedIn && !isAuthRoute && !isOnboardingRoute) {
-        // Profile still loading — allow through (dashboard handles loading state)
-        if (currentUser == null) return null;
-        // Onboarding not complete — redirect into flow
-        if (!currentUser.onboardingComplete) {
-          final saved = currentUser.onboardingStep;
-          final step = saved != null
-              ? (OnboardingStep.nextStep(saved) ?? OnboardingStep.welcome)
-              : OnboardingStep.welcome;
-          return OnboardingStep.routeFor(step);
-        }
-      }
+        // Onboarding incomplete → send to the correct onboarding step.
+        // Exception: success screen is OK to visit right after completing.
+        AppLifecycleOnboarding(:final step) =>
+            isOnboarding || loc == '/onboarding/success'
+                ? null
+                : OnboardingStep.routeFor(step),
 
-      // Logged in + on onboarding + already complete → go to dashboard
-      if (isLoggedIn && isOnboardingRoute && currentUser?.onboardingComplete == true) {
-        // Exception: success screen is fine to visit (briefly) after complete
-        if (loc == '/onboarding/success') return null;
-        return '/dashboard';
-      }
+        // Onboarding done but no semester → force semester setup.
+        // Exception: allow the semester-setup screen itself and success screen.
+        AppLifecycleNeedsSemester() =>
+            loc == _semesterSetupRoute || loc == '/onboarding/success'
+                ? null
+                : _semesterSetupRoute,
 
-      return null;
+        // Fully ready → block lingering on onboarding screens.
+        AppLifecycleReady() => isOnboarding && loc != '/onboarding/success'
+            ? _dashboardRoute
+            : null,
+      };
     },
     routes: [
-      // ─── Onboarding Routes ────────────────────────────────────────────────────
+      // ─── Onboarding Routes ─────────────────────────────────────────────────
       GoRoute(
         path: '/onboarding/welcome',
         name: 'obWelcome',
@@ -149,24 +145,7 @@ GoRouter appRouter(Ref ref) {
         builder: (_, __) => const ObSuccessScreen(),
       ),
 
-      // ─── Auth Routes ─────────────────────────────────────────────────────────
-      GoRoute(
-        path: '/auth/login',
-        name: 'login',
-        builder: (context, state) => const LoginScreen(),
-      ),
-      GoRoute(
-        path: '/auth/signup',
-        name: 'signup',
-        builder: (context, state) => const SignupScreen(),
-      ),
-      GoRoute(
-        path: '/auth/forgot-password',
-        name: 'forgotPassword',
-        builder: (context, state) => const ForgotPasswordScreen(),
-      ),
-
-      // ─── Main Shell (Bottom Nav) ──────────────────────────────────────────────
+      // ─── Main Shell (Bottom Nav) ────────────────────────────────────────────
       ShellRoute(
         builder: (context, state, child) => MainShell(child: child),
         routes: [
@@ -193,7 +172,7 @@ GoRouter appRouter(Ref ref) {
         ],
       ),
 
-      // ─── Standalone Routes ────────────────────────────────────────────────────
+      // ─── Standalone Routes ──────────────────────────────────────────────────
       GoRoute(
         path: '/subjects',
         name: 'subjects',
@@ -222,7 +201,6 @@ GoRouter appRouter(Ref ref) {
           ),
         ],
       ),
-      // ─── Attendance History ────────────────────────────────────────────────────
       GoRoute(
         path: '/attendance/history',
         name: 'attendanceHistory',
@@ -238,7 +216,6 @@ GoRouter appRouter(Ref ref) {
         name: 'semesterSetup',
         builder: (context, state) => const SemesterSetupScreen(),
       ),
-      // ─── Timetable Editor (post-onboarding) ───────────────────────────────────
       GoRoute(
         path: '/timetable/edit',
         name: 'editTimetable',

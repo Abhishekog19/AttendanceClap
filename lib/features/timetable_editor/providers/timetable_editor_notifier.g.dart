@@ -7,7 +7,7 @@ part of 'timetable_editor_notifier.dart';
 // **************************************************************************
 
 String _$timetableEditorNotifierHash() =>
-    r'e0bf688cf853c2246c7c57f96f93c76ada7b140f';
+    r'a945ba2bd0ae5e5a269669fbb739b27d80cdb0f6';
 
 /// See also [TimetableEditorNotifier].
 @ProviderFor(TimetableEditorNotifier)
