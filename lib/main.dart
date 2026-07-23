@@ -16,6 +16,10 @@ void main() async {
   // Load environment variables (Groq API key, Razorpay key, etc.)
   await dotenv.load(fileName: '.env');
 
+  // Firebase.initializeApp is retained for Firestore and Crashlytics.
+  // Firebase Auth initialization has been removed from the boot sequence —
+  // the app no longer uses Firebase Auth for routing (Phase 3).
+  // firebase_auth package stays in pubspec.yaml until Phase 7 cleanup.
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );

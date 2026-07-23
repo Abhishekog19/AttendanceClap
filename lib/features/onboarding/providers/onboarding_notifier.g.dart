@@ -7,7 +7,7 @@ part of 'onboarding_notifier.dart';
 // **************************************************************************
 
 String _$onboardingRepositoryHash() =>
-    r'14bc72d82bef080bc05420707fe5396a5993eb34';
+    r'ceb27c33f1502307d262d38c1615e6211700f01f';
 
 /// See also [onboardingRepository].
 @ProviderFor(onboardingRepository)
@@ -26,7 +26,7 @@ final onboardingRepositoryProvider =
 // ignore: unused_element
 typedef OnboardingRepositoryRef = AutoDisposeProviderRef<OnboardingRepository>;
 String _$onboardingNotifierHash() =>
-    r'04f156e442614cee41865e55229a911c1b408e45';
+    r'1545ef0cb1a8b5c83288feee771708ff791fad2e';
 
 /// See also [OnboardingNotifier].
 @ProviderFor(OnboardingNotifier)

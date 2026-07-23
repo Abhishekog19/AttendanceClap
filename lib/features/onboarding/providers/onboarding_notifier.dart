@@ -5,7 +5,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../data/datasources/firestore_datasource.dart';
 import '../../../data/models/subject_model.dart';
-import '../../../data/repositories/auth_repository.dart';
+// auth_repository import removed — router now gates onboarding via AppLifecycleState.
 import '../../../data/repositories/timetable_repository.dart';
 import '../../../features/timetable_editor/providers/timetable_editor_notifier.dart';
 import '../repositories/onboarding_repository.dart';
@@ -13,15 +13,16 @@ import 'onboarding_state.dart';
 
 part 'onboarding_notifier.g.dart';
 
-// ─── OnboardingRepository provider ────────────────────────────────────────────
+// ─── OnboardingRepository provider ────────────────────────────────────────────────────────────
 
 @riverpod
 OnboardingRepository onboardingRepository(Ref ref) {
-  final uid = ref.watch(currentUserProvider)?.uid ?? '';
+  // uid removed: local DB does not require a user ID.
+  // Will be fully replaced when Firestore data layer is removed (Phase 4+).
   return OnboardingRepository(
     db: ref.watch(firestoreDatasourceProvider),
     timetableRepo: ref.watch(timetableRepositoryProvider),
-    uid: uid,
+    uid: '', // placeholder — auth uid no longer drives routing
   );
 }
 
@@ -38,19 +39,10 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   }
 
   Future<void> _hydrateIfNeeded() async {
-    final profile = await ref.read(currentUserProfileProvider.future);
-    if (profile == null || profile.onboardingComplete) return;
-
-    final completedStep = profile.onboardingStep;
-    final resumeStep = completedStep == null
-        ? OnboardingStep.welcome
-        : OnboardingStep.nextStep(completedStep) ?? completedStep;
-    await restoreFromFirestore(
-      lastStep: resumeStep,
-      collegeName: profile.collegeName,
-      courseName: profile.courseName,
-      semesterName: profile.semesterName,
-    );
+    // Phase 3: no-op stub.
+    // Previously read currentUserProfileProvider to decide whether to resume
+    // onboarding. That check is now owned by the router (AppLifecycleState).
+    // Full local-DB hydration replaces this in Phase 4.
   }
 
   OnboardingRepository get _repo => ref.read(onboardingRepositoryProvider);

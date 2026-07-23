@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../../data/repositories/auth_repository.dart';
+// auth_repository import removed — no auth gate in Phase 3+.
 import '../models/app_notification_model.dart';
 import '../repositories/app_notification_repository.dart';
 
@@ -13,12 +13,10 @@ part 'app_notification_provider.g.dart';
 //
 // Real-time stream of the LATEST page of notifications.
 // Limited to AppNotificationRepository.pageSize (20) docs — efficient.
-// Re-subscribes automatically when the auth user changes.
 // ─────────────────────────────────────────────────────────────────────────────
 
 @riverpod
 Stream<List<AppNotificationModel>> appNotifications(Ref ref) {
-  ref.watch(authStateChangesProvider); // re-subscribe on auth change
   final repo = ref.watch(appNotificationRepositoryProvider);
   return repo.watchLatestPage();
 }
@@ -27,7 +25,6 @@ Stream<List<AppNotificationModel>> appNotifications(Ref ref) {
 
 @riverpod
 Stream<int> unreadNotificationCount(Ref ref) {
-  ref.watch(authStateChangesProvider); // re-subscribe on auth change
   final repo = ref.watch(appNotificationRepositoryProvider);
   return repo.watchUnreadCount();
 }
@@ -75,10 +72,6 @@ class NotificationPageState {
 class NotificationPagination extends _$NotificationPagination {
   @override
   NotificationPageState build() {
-    // ACCOUNT ISOLATION FIX: watch auth so this notifier is disposed and
-    // rebuilt fresh when the user logs out/in. Without this, extraPageItems
-    // from Account A survive into Account B's session.
-    ref.watch(authStateChangesProvider);
 
     // Seed with the live first page from the stream
     ref.listen(appNotificationsProvider, (_, next) {
