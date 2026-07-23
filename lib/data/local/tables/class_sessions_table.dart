@@ -65,4 +65,15 @@ class ClassSessions extends Table {
 
   @override
   Set<Column> get primaryKey => {id};
+
+  /// Unique constraint enforcing one session per (timetable_entry, date).
+  /// This is the structural guarantee that makes SessionGenerator idempotent:
+  /// INSERT OR IGNORE silently skips the row if it already exists.
+  /// NULL timetable_entry_id rows (extra periods) are intentionally excluded
+  /// from this constraint — SQLite treats NULL as distinct in UNIQUE indexes,
+  /// so multiple extra-period rows on the same date are still permitted.
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {timetableEntryId, date},
+      ];
 }
