@@ -33,6 +33,9 @@ class ObReviewScreen extends ConsumerWidget {
     return OnboardingScaffold(
       stepIndex: OnboardingStep.indexOf(OnboardingStep.review),
       totalSteps: OnboardingStep.all.length,
+      showSkip: true,
+      skipLabel: 'Skip',
+      onSkip: () => notifier.skipAllAndComplete(context),
       onBack: () => context.go(OnboardingStep.routeFor(OnboardingStep.import)),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

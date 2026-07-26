@@ -22,12 +22,28 @@
 library;
 
 import 'package:drift/drift.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../local/database.dart';
 import '../local/daos/attendance_dao.dart';
 import '../local/daos/subjects_dao.dart';
 import '../local/session_generator.dart';
+import '../../core/router/app_lifecycle_state.dart' show appDatabaseProvider;
+
+part 'local_attendance_repository.g.dart';
+
+// ── Riverpod provider ─────────────────────────────────────────────────────────
+
+/// Application-scoped [LocalAttendanceRepository] instance.
+///
+/// [keepAlive: true] — the repository owns the DAOs and session generator;
+/// disposing it would leave callers holding stale references.
+@Riverpod(keepAlive: true)
+LocalAttendanceRepository localAttendanceRepository(Ref ref) {
+  return LocalAttendanceRepository(ref.watch(appDatabaseProvider));
+}
 
 // ── SubjectStats ──────────────────────────────────────────────────────────────
 
@@ -298,7 +314,129 @@ class LocalAttendanceRepository {
     return subjects.map(_toStats).toList();
   }
 
-  // ── Private ───────────────────────────────────────────────────────────────
+  // ── watchAllSubjects ──────────────────────────────────────────────────────
+
+  /// Streams all subjects (ordered by name), emitting a new list whenever any
+  /// subject row changes. This is the primary live-data source for the
+  /// dashboard and subjects feature screens.
+  Stream<List<Subject>> watchAllSubjects() => _subjectsDao.watchAllSubjects();
+
+  // ── watchLogsForSubject ───────────────────────────────────────────────────
+
+  /// Streams non-archived attendance logs for [subjectId], most-recent first.
+  /// Used by subject detail and analytics screens.
+  Stream<List<AttendanceLog>> watchLogsForSubject(String subjectId) =>
+      _attendanceDao.watchLogsForSubject(subjectId);
+
+  // ── watchUpcomingSessionsForSubject ───────────────────────────────────────
+
+  /// Streams class sessions for [subjectId] that are scheduled on or after
+  /// today and have not yet been marked, ordered by date then start_time.
+  Stream<List<ClassSession>> watchUpcomingSessionsForSubject(
+      String subjectId) {
+    final nowMidnight = DateTime.utc(
+            DateTime.now().year, DateTime.now().month, DateTime.now().day)
+        .millisecondsSinceEpoch;
+    return (_db.select(_db.classSessions)
+          ..where((s) =>
+              s.subjectId.equals(subjectId) &
+              s.date.isBiggerOrEqualValue(nowMidnight) &
+              s.status.equals('notMarked'))
+          ..orderBy([
+            (s) => OrderingTerm.asc(s.date),
+            (s) => OrderingTerm.asc(s.startTime),
+          ]))
+        .watch();
+  }
+
+  // ── Subject CRUD ──────────────────────────────────────────────────────────
+
+  /// Inserts a new subject. Assigns a color from the rotating palette and
+  /// auto-generates a shortName if not supplied.
+  Future<String> addSubject({
+    required String name,
+    int attendedClasses = 0,
+    int totalClasses = 0,
+    String? faculty,
+    String? colorHex,
+    String? shortName,
+  }) async {
+    final existing = await _subjectsDao.getAllSubjects();
+    final usedColors =
+        existing.where((s) => s.colorHex != null).map((s) => s.colorHex!).toList();
+
+    final id = _uuid.v4();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _db.into(_db.subjects).insert(SubjectsCompanion.insert(
+          id: id,
+          name: name,
+          attendedClasses: Value(attendedClasses),
+          totalClasses: Value(totalClasses),
+          faculty: Value(faculty),
+          attendanceTarget: const Value(null),
+          colorHex: Value(colorHex ?? _nextColor(usedColors)),
+          shortName: Value(shortName ?? _autoShortName(name)),
+          createdAt: now,
+          updatedAt: now,
+        ));
+    return id;
+  }
+
+  /// Updates an existing subject row. No rename propagation needed —
+  /// local DB joins by subject_id, not by name.
+  Future<void> updateSubject(Subject subject) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await (_db.update(_db.subjects)
+          ..where((s) => s.id.equals(subject.id)))
+        .write(SubjectsCompanion(
+          name: Value(subject.name),
+          faculty: Value(subject.faculty),
+          attendanceTarget: Value(subject.attendanceTarget),
+          colorHex: Value(subject.colorHex),
+          shortName: Value(subject.shortName),
+          updatedAt: Value(now),
+        ));
+  }
+
+  /// Deletes a subject. All dependent rows are removed automatically:
+  ///   timetable_entries  → ON DELETE CASCADE
+  ///   class_sessions     → ON DELETE CASCADE
+  ///   attendance_logs    → ON DELETE CASCADE
+  /// (RESTRICT FK on semester_id is on semesters, not subjects.)
+  Future<void> deleteSubject(String subjectId) async {
+    await (_db.delete(_db.subjects)
+          ..where((s) => s.id.equals(subjectId)))
+        .go();
+  }
+
+  // ── Timetable entry reads (used by predictor + timetable provider) ─────────
+
+  /// Streams all timetable entries, ordered by day_of_week then start_time.
+  Stream<List<TimetableEntry>> watchTimetableEntries() {
+    return (_db.select(_db.timetableEntries)
+          ..orderBy([
+            (e) => OrderingTerm.asc(e.dayOfWeek),
+            (e) => OrderingTerm.asc(e.startTime),
+          ]))
+        .watch();
+  }
+
+  // ── Semester reads (used by predictor + timetable provider) ───────────────
+
+  /// Returns the active semester as defined by [AppSettings.activeSemesterId],
+  /// or null when none is set.
+  Future<Semester?> getActiveSemester() async {
+    final settings = await (_db.select(_db.appSettings)
+          ..where((s) => s.id.equals(1)))
+        .getSingleOrNull();
+    final semId = settings?.activeSemesterId;
+    if (semId == null || semId.isEmpty) return null;
+    return (_db.select(_db.semesters)
+          ..where((s) => s.id.equals(semId)))
+        .getSingleOrNull();
+  }
+
+  // ── Private helpers ───────────────────────────────────────────────────────
 
   static SubjectStats _toStats(Subject s) => SubjectStats(
         subjectId: s.id,
@@ -309,4 +447,22 @@ class LocalAttendanceRepository {
         colorHex: s.colorHex,
         shortName: s.shortName,
       );
+
+  static const _palette = [
+    '#EF5350', '#EC407A', '#AB47BC', '#7E57C2', '#42A5F5',
+    '#26C6DA', '#26A69A', '#66BB6A', '#D4E157', '#FFA726',
+  ];
+
+  static String _nextColor(List<String> used) {
+    for (final c in _palette) {
+      if (!used.contains(c)) return c;
+    }
+    return _palette[used.length % _palette.length];
+  }
+
+  static String _autoShortName(String name) {
+    final words = name.trim().split(RegExp(r'\s+'));
+    if (words.length == 1) return name.substring(0, name.length.clamp(0, 3)).toUpperCase();
+    return words.map((w) => w.isNotEmpty ? w[0].toUpperCase() : '').join();
+  }
 }

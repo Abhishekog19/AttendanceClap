@@ -20,6 +20,9 @@ class ObSubjectSetupScreen extends ConsumerWidget {
     return OnboardingScaffold(
       stepIndex: OnboardingStep.indexOf(OnboardingStep.subjects),
       totalSteps: OnboardingStep.all.length,
+      showSkip: true,
+      skipLabel: 'Skip All',
+      onSkip: () => notifier.skipAllAndComplete(context),
       onBack: () => context.go(OnboardingStep.routeFor(OnboardingStep.semester)),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

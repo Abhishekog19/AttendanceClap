@@ -66,6 +66,9 @@ class _ObSemesterSetupScreenState
     return OnboardingScaffold(
       stepIndex: OnboardingStep.indexOf(OnboardingStep.semester),
       totalSteps: OnboardingStep.all.length,
+      showSkip: true,
+      skipLabel: 'Skip All',
+      onSkip: () => notifier.skipAllAndComplete(context),
       onBack: () => context.go(OnboardingStep.routeFor(OnboardingStep.college)),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,20 +1,46 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../../data/models/subject_model.dart';
-import '../../../data/datasources/firestore_datasource.dart';
-import '../../../data/repositories/auth_repository.dart';
 import '../../../core/utils/attendance_calculator.dart';
+import '../../../data/local/database.dart';
+import '../../../data/models/subject_model.dart';
+import '../../../data/repositories/local_attendance_repository.dart';
 import '../../profile/providers/profile_provider.dart';
 
 part 'dashboard_provider.g.dart';
 
+// ── Local subjects stream ─────────────────────────────────────────────────────
+
+/// Streams all subjects from the local SQLite database, ordered by name.
+///
+/// This replaces the old Firestore-backed `subjectsStreamProvider`.
+/// The provider name is kept the same so all existing consumers
+/// (subjects_provider.dart, subject_detail_provider.dart) continue to work
+/// without any import changes.
 @riverpod
 Stream<List<SubjectModel>> subjectsStream(Ref ref) {
-  final uid = ref.watch(currentUserProvider)?.uid;
-  if (uid == null) return const Stream.empty();
-  return ref.watch(firestoreDatasourceProvider).watchSubjects(uid);
+  final repo = ref.watch(localAttendanceRepositoryProvider);
+  // Convert Drift Subject → SubjectModel so downstream consumers keep
+  // receiving the same type they already expect.
+  return repo.watchAllSubjects().map(
+    (rows) => rows
+        .map((s) => SubjectModel(
+              id: s.id,
+              name: s.name,
+              attendedClasses: s.attendedClasses,
+              totalClasses: s.totalClasses,
+              faculty: s.faculty,
+              attendanceTarget: s.attendanceTarget,
+              colorHex: s.colorHex,
+              shortName: s.shortName,
+              createdAt: DateTime.fromMillisecondsSinceEpoch(s.createdAt),
+              updatedAt: DateTime.fromMillisecondsSinceEpoch(s.updatedAt),
+            ))
+        .toList(),
+  );
 }
+
+// ── DashboardNotifier ────────────────────────────────────────────────────────
 
 @riverpod
 class DashboardNotifier extends _$DashboardNotifier {
@@ -42,7 +68,6 @@ class DashboardNotifier extends _$DashboardNotifier {
       );
     }
 
-    // Aggregate
     int totalAttended = 0;
     int totalClasses = 0;
     for (final s in subjects) {
@@ -80,6 +105,8 @@ class DashboardNotifier extends _$DashboardNotifier {
     );
   }
 }
+
+// ── DashboardData ─────────────────────────────────────────────────────────────
 
 class DashboardData {
   final List<SubjectModel> subjects;

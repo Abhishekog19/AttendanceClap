@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../../core/router/app_lifecycle_state.dart';
 import '../../../data/datasources/firestore_datasource.dart';
+import '../../../data/local/database.dart';
 import '../../../data/models/subject_model.dart';
 // auth_repository import removed — router now gates onboarding via AppLifecycleState.
 import '../../../data/repositories/timetable_repository.dart';
@@ -55,6 +59,22 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   Future<void> advanceStep(String completedStep) async {
     final next = OnboardingStep.nextStep(completedStep);
     state = state.copyWith(currentStep: next ?? completedStep, error: null);
+
+    // ── Write the new step to the local SQLite app_settings row ──────────────
+    // appLifecycleStateProvider watches this row. Without this write the router
+    // keeps emitting AppLifecycleOnboarding('welcome') and redirects every
+    // GoRouter.go() call back to /onboarding/welcome.
+    final db = ref.read(appDatabaseProvider);
+    await (db.into(db.appSettings)).insertOnConflictUpdate(
+      AppSettingsCompanion(
+        id: const Value(1),
+        onboardingStep: Value(next ?? completedStep),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+
+    // Legacy Firestore write (uid = '' → no-op; safe to leave until Phase 4
+    // removes Firestore entirely).
     await _repo.saveStep(completedStep);
   }
 
@@ -393,10 +413,18 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   Future<bool> confirmAndComplete() async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      // Generate class sessions from timetable/config/lectures (new system)
+      // Generate class sessions from timetable (no-op when uid empty or skipped)
       if (!state.timetableSkipped) {
         await _repo.generateClassSessions();
       }
+
+      // ── Persist semester + active_semester_id to local SQLite ────────────
+      // The router requires active_semester_id != null for AppLifecycleReady.
+      // Without this write the router stays in NeedsSemester and redirects
+      // to the post-onboarding SemesterSetupScreen which crashes (needs auth uid).
+      await _persistLocalSemester();
+
+      // Legacy Firestore complete — no-op when uid is empty (Phase 3).
       await _repo.markComplete();
       state = state.copyWith(isLoading: false);
       return true;
@@ -404,6 +432,64 @@ class OnboardingNotifier extends _$OnboardingNotifier {
       state = state.copyWith(isLoading: false, error: e.toString());
       return false;
     }
+  }
+
+  /// Emergency skip: marks onboarding complete without saving any data.
+  /// Writes a placeholder semester row so the router sees AppLifecycleReady
+  /// and navigates to /dashboard instead of looping into NeedsSemester.
+  Future<void> skipAllAndComplete(BuildContext context) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      await _persistLocalSemester();
+      state = state.copyWith(isLoading: false);
+      if (context.mounted) {
+        GoRouter.of(context).go('/onboarding/success');
+      }
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: e.toString());
+    }
+  }
+
+  /// Inserts a semester row into the local SQLite `semesters` table and sets
+  /// `app_settings.active_semester_id` to that UUID.
+  ///
+  /// Uses real semester dates when available (from state), otherwise falls back
+  /// to a 6-month window starting today.
+  ///
+  /// Must be called BEFORE navigating away from onboarding so the router
+  /// emits AppLifecycleReady on the very next stream event.
+  Future<void> _persistLocalSemester() async {
+    final db = ref.read(appDatabaseProvider);
+    final semId = state.semesterId ?? const Uuid().v4();
+    final now = DateTime.now();
+    final start = state.semesterStart ?? now;
+    final end = state.semesterEnd ?? now.add(const Duration(days: 180));
+    final name = state.semesterName.isNotEmpty
+        ? state.semesterName
+        : 'Semester 1';
+
+    // Insert the semester row (idempotent — replace on conflict).
+    await (db.into(db.semesters)).insertOnConflictUpdate(
+      SemestersCompanion(
+        id: Value(semId),
+        name: Value(name),
+        startDate: Value(start.millisecondsSinceEpoch),
+        endDate: Value(end.millisecondsSinceEpoch),
+        createdAt: Value(now.millisecondsSinceEpoch),
+        isActive: const Value(1),
+      ),
+    );
+
+    // Update app_settings: mark onboarding done + point to this semester.
+    await (db.into(db.appSettings)).insertOnConflictUpdate(
+      AppSettingsCompanion(
+        id: const Value(1),
+        onboardingComplete: const Value(1),
+        onboardingStep: const Value('complete'),
+        activeSemesterId: Value(semId),
+        updatedAt: Value(now.millisecondsSinceEpoch),
+      ),
+    );
   }
 
   // ─── Resume (called on launch when onboardingComplete == false) ───────────

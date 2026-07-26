@@ -45,7 +45,12 @@ class TimetableRepository {
         _auth = auth,
         _ds = datasource;
 
-  String get _uid => _auth.currentUser!.uid;
+  /// Returns the current uid, or '' when unauthenticated.
+  /// Phase 3: auth has been removed; this always returns ''.
+  /// Individual methods that build Firestore paths must guard with
+  ///   `if (_uid.isEmpty) return …;`
+  /// before making any Firestore call.
+  String get _uid => _auth.currentUser?.uid ?? '';
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
