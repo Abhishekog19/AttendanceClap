@@ -6,7 +6,7 @@ part of 'subject_detail_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$upcomingSessionsHash() => r'fe22078c5e533ed61a4505286574e9a0fc2ae0ac';
+String _$upcomingSessionsHash() => r'76536d123f9d3c32954521347f9fea1541ae3427';
 
 /// Copied from Dart SDK
 class _SystemHash {
@@ -159,15 +159,14 @@ class _UpcomingSessionsProviderElement
   String get subjectId => (origin as UpcomingSessionsProvider).subjectId;
 }
 
-String _$subjectLogsStreamHash() => r'a0462129bedca07a73fa4beabed6caba91739ba5';
+String _$subjectLogsStreamHash() => r'f9164f2d13093a4149c310cd43f9c003b4d27b91';
 
 /// See also [subjectLogsStream].
 @ProviderFor(subjectLogsStream)
 const subjectLogsStreamProvider = SubjectLogsStreamFamily();
 
 /// See also [subjectLogsStream].
-class SubjectLogsStreamFamily
-    extends Family<AsyncValue<List<AttendanceLogModel>>> {
+class SubjectLogsStreamFamily extends Family<AsyncValue<List<AttendanceLog>>> {
   /// See also [subjectLogsStream].
   const SubjectLogsStreamFamily();
 
@@ -206,7 +205,7 @@ class SubjectLogsStreamFamily
 
 /// See also [subjectLogsStream].
 class SubjectLogsStreamProvider
-    extends AutoDisposeStreamProvider<List<AttendanceLogModel>> {
+    extends AutoDisposeStreamProvider<List<AttendanceLog>> {
   /// See also [subjectLogsStream].
   SubjectLogsStreamProvider(
     String subjectId,
@@ -241,8 +240,7 @@ class SubjectLogsStreamProvider
 
   @override
   Override overrideWith(
-    Stream<List<AttendanceLogModel>> Function(SubjectLogsStreamRef provider)
-        create,
+    Stream<List<AttendanceLog>> Function(SubjectLogsStreamRef provider) create,
   ) {
     return ProviderOverride(
       origin: this,
@@ -259,7 +257,7 @@ class SubjectLogsStreamProvider
   }
 
   @override
-  AutoDisposeStreamProviderElement<List<AttendanceLogModel>> createElement() {
+  AutoDisposeStreamProviderElement<List<AttendanceLog>> createElement() {
     return _SubjectLogsStreamProviderElement(this);
   }
 
@@ -280,13 +278,13 @@ class SubjectLogsStreamProvider
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 mixin SubjectLogsStreamRef
-    on AutoDisposeStreamProviderRef<List<AttendanceLogModel>> {
+    on AutoDisposeStreamProviderRef<List<AttendanceLog>> {
   /// The parameter `subjectId` of this provider.
   String get subjectId;
 }
 
 class _SubjectLogsStreamProviderElement
-    extends AutoDisposeStreamProviderElement<List<AttendanceLogModel>>
+    extends AutoDisposeStreamProviderElement<List<AttendanceLog>>
     with SubjectLogsStreamRef {
   _SubjectLogsStreamProviderElement(super.provider);
 

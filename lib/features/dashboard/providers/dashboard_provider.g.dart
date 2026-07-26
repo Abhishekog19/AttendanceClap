@@ -6,9 +6,16 @@ part of 'dashboard_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$subjectsStreamHash() => r'9813a13aa79f6533299dcaac0f410c109176036b';
+String _$subjectsStreamHash() => r'5aca6fe63ddeddb69ce1dfc1b904aa7e5d30ae12';
 
-/// See also [subjectsStream].
+/// Streams all subjects from the local SQLite database, ordered by name.
+///
+/// This replaces the old Firestore-backed `subjectsStreamProvider`.
+/// The provider name is kept the same so all existing consumers
+/// (subjects_provider.dart, subject_detail_provider.dart) continue to work
+/// without any import changes.
+///
+/// Copied from [subjectsStream].
 @ProviderFor(subjectsStream)
 final subjectsStreamProvider =
     AutoDisposeStreamProvider<List<SubjectModel>>.internal(

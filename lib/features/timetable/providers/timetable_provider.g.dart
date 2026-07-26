@@ -7,7 +7,7 @@ part of 'timetable_provider.dart';
 // **************************************************************************
 
 String _$todaySessionsStreamHash() =>
-    r'412472dc8b1caee04f65804068bba78ef7273226';
+    r'3ef2c1e8e938d46de275f248758e516db5f31459';
 
 /// See also [todaySessionsStream].
 @ProviderFor(todaySessionsStream)
@@ -27,7 +27,7 @@ final todaySessionsStreamProvider =
 typedef TodaySessionsStreamRef
     = AutoDisposeStreamProviderRef<List<ClassSession>>;
 String _$todayOverridesStreamHash() =>
-    r'ec77c5610aaed59d5f6d9c242af9dd9183fb2388';
+    r'15eb0e4e34415bf91c0fb7331b08eca209356ee5';
 
 /// See also [todayOverridesStream].
 @ProviderFor(todayOverridesStream)
@@ -127,7 +127,7 @@ final nextClassProvider = AutoDisposeProvider<ClassSession?>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef NextClassRef = AutoDisposeProviderRef<ClassSession?>;
-String _$scheduleNotifierHash() => r'64bdba2acf5c98354a560eae23b3f339383293a3';
+String _$scheduleNotifierHash() => r'61e62c8666c427f0f6c60db2198df914ecf7e5dc';
 
 /// See also [ScheduleNotifier].
 @ProviderFor(ScheduleNotifier)

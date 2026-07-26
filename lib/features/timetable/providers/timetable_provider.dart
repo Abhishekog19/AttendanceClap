@@ -5,7 +5,9 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../data/models/class_session_model.dart';
 import '../../../data/models/daily_schedule_override_model.dart';
-import '../../../data/repositories/timetable_repository.dart';
+import '../../../data/repositories/local_attendance_repository.dart';
+import '../../../core/router/app_lifecycle_state.dart'
+    show appLifecycleStateProvider, AppLifecycleReady;
 
 part 'timetable_provider.g.dart';
 
@@ -38,24 +40,32 @@ class SchedulePageData {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Today's raw sessions stream
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
+//  Today's raw sessions stream  (LOCAL — Phase 4)
+// ───────────────────────────────────────────────────────────────────────────────
 
 @riverpod
 Stream<List<ClassSession>> todaySessionsStream(Ref ref) {
-  return ref.watch(timetableRepositoryProvider).todaySessionsStream();
+  final repo = ref.watch(localAttendanceRepositoryProvider);
+  // Resolve active semester from lifecycle state (already computed by router).
+  final lifecycle = ref.watch(appLifecycleStateProvider).valueOrNull;
+  final semId = lifecycle is AppLifecycleReady ? lifecycle.activeSemesterId : null;
+  if (semId == null) return Stream.value(const <ClassSession>[]);
+  return repo.watchTodaySessionModels(
+    date: DateTime.now(),
+    activeSemesterId: semId,
+  );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Daily overrides stream for today
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
+//  Daily overrides stream for today  (LOCAL — Phase 4)
+// ───────────────────────────────────────────────────────────────────────────────
 
 @riverpod
 Stream<List<DailyScheduleOverride>> todayOverridesStream(Ref ref) {
   return ref
-      .watch(timetableRepositoryProvider)
-      .watchDailyOverridesForDate(DateTime.now());
+      .watch(localAttendanceRepositoryProvider)
+      .watchDailyOverrideModels(DateTime.now());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -65,15 +75,13 @@ Stream<List<DailyScheduleOverride>> todayOverridesStream(Ref ref) {
 @riverpod
 SchedulePageData schedulePageData(Ref ref) {
   final sessionsAsync = ref.watch(todaySessionsStreamProvider);
-  final overridesAsync = ref.watch(todayOverridesStreamProvider);
 
-  final rawSessions = sessionsAsync.valueOrNull ?? [];
-  final overrides = overridesAsync.valueOrNull ?? [];
+  // Sessions arrive override-resolved from LocalAttendanceRepository.watchTodaySessionModels:
+  // overrideStartTime / overrideEndTime are already embedded, so session.displayStartTime
+  // and session.displayEndTime are correct without any extra merge step.
+  final sessions = List<ClassSession>.from(sessionsAsync.valueOrNull ?? []);
 
-  // Apply overrides to sessions
-  final sessions = _applyOverrides(rawSessions, overrides);
-
-  // Sort by display start time
+  // Sort by display start time (already override-aware on fs.ClassSession)
   sessions.sort((a, b) => a.displayStartTime.compareTo(b.displayStartTime));
 
   final now = DateTime.now();
@@ -85,7 +93,6 @@ SchedulePageData schedulePageData(Ref ref) {
   final completedToday = <ClassSession>[];
 
   for (final session in sessions) {
-    // Skip cancelled sessions from buckets (they'll be in completed)
     if (session.isCancelled) {
       completedToday.add(session);
       continue;
@@ -98,83 +105,29 @@ SchedulePageData schedulePageData(Ref ref) {
     if (isMarked) {
       completedToday.add(session);
     } else if (nowMinutes >= startMin && nowMinutes < endMin) {
-      // Currently in progress
       currentClass ??= session;
     } else if (nowMinutes < startMin) {
-      // Hasn't started yet
       upcoming.add(session);
     } else {
-      // Ended, not marked → action required
       actionRequired.add(session);
     }
   }
-
-  final totalNonCancelled =
-      sessions.where((s) => !s.isCancelled).length;
 
   return SchedulePageData(
     currentClass: currentClass,
     upcoming: upcoming,
     actionRequired: actionRequired,
     completedToday: completedToday,
-    totalTodayCount: totalNonCancelled,
+    totalTodayCount: sessions.where((s) => !s.isCancelled).length,
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Apply daily overrides to sessions
+//  _applyOverrides removed — override merging now happens inside
+//  LocalAttendanceRepository.watchTodaySessionModels (repo JOIN layer).
+//  Sessions returned from todaySessionsStreamProvider already have
+//  overrideStartTime / overrideEndTime / overrideSubjectId embedded.
 // ─────────────────────────────────────────────────────────────────────────────
-
-List<ClassSession> _applyOverrides(
-  List<ClassSession> sessions,
-  List<DailyScheduleOverride> overrides,
-) {
-  if (overrides.isEmpty) return List.from(sessions);
-
-  // Build override map: sessionId → override
-  final overrideMap = <String, DailyScheduleOverride>{};
-  final extraSessions = <DailyScheduleOverride>[];
-
-  for (final o in overrides) {
-    if (o.type == OverrideType.addExtra) {
-      extraSessions.add(o);
-    } else {
-      overrideMap[o.sessionId] = o;
-    }
-  }
-
-  final result = sessions.map((session) {
-    final override = overrideMap[session.id];
-    if (override == null) return session;
-
-    return session.copyWith(
-      isCancelled: override.type == OverrideType.cancel,
-      overrideSubjectId: override.newSubjectId,
-      overrideSubjectName: override.newSubjectName,
-      overrideStartTime: override.newStartTime,
-      overrideEndTime: override.newEndTime,
-    );
-  }).toList();
-
-  // Add extra periods as synthetic ClassSession objects
-  for (final extra in extraSessions) {
-    if (extra.newSubjectId == null || extra.newStartTime == null) continue;
-    final now = DateTime.now();
-    result.add(ClassSession(
-      id: extra.id, // Use override ID as session ID for extra periods
-      subjectId: extra.newSubjectId!,
-      subjectName: extra.newSubjectName ?? 'Extra Period',
-      date: DateTime(now.year, now.month, now.day),
-      startTime: extra.newStartTime!,
-      endTime: extra.newEndTime ?? extra.newStartTime!,
-      status: AttendanceStatus.notMarked,
-      uid: extra.uid,
-      isExtraPeriod: true,
-    ));
-  }
-
-  return result;
-}
 
 int _parseTimeMinutes(String t) {
   final parts = t.split(':');
@@ -211,9 +164,9 @@ class ScheduleNotifier extends _$ScheduleNotifier {
   @override
   ScheduleNotifierState build() => const ScheduleNotifierState();
 
-  TimetableRepository get _repo => ref.read(timetableRepositoryProvider);
+  LocalAttendanceRepository get _repo => ref.read(localAttendanceRepositoryProvider);
 
-  // ── Core attendance marking (FIXED — writes log + updates counters) ────────
+  // ── Core attendance marking (LOCAL — Phase 4) ─────────────────────────────
 
   /// Mark a single session's attendance.
   /// Only allowed after the class end time has passed.
@@ -221,7 +174,6 @@ class ScheduleNotifier extends _$ScheduleNotifier {
     required ClassSession session,
     required AttendanceStatus status,
   }) async {
-    // Guard: only mark after class has ended
     if (!session.hasEnded && !session.isExtraPeriod) return;
 
     state = const ScheduleNotifierState(status: ScheduleActionStatus.loading);
@@ -280,9 +232,8 @@ class ScheduleNotifier extends _$ScheduleNotifier {
   Future<void> saveOverride(DailyScheduleOverride override) async {
     state = const ScheduleNotifierState(status: ScheduleActionStatus.loading);
     try {
-      await _repo.saveDailyOverride(override);
-      state =
-          const ScheduleNotifierState(status: ScheduleActionStatus.success);
+      await _repo.saveOverride(override);
+      state = const ScheduleNotifierState(status: ScheduleActionStatus.success);
     } catch (e) {
       state = ScheduleNotifierState(
         status: ScheduleActionStatus.error,
@@ -292,13 +243,19 @@ class ScheduleNotifier extends _$ScheduleNotifier {
   }
 
   Future<void> deleteOverride(String overrideId, DateTime date) async {
+    state = const ScheduleNotifierState(status: ScheduleActionStatus.loading);
     try {
-      await _repo.deleteDailyOverride(overrideId, date);
-    } catch (_) {}
+      await _repo.deleteOverride(overrideId, date);
+      state = const ScheduleNotifierState(status: ScheduleActionStatus.success);
+    } catch (e) {
+      state = ScheduleNotifierState(
+        status: ScheduleActionStatus.error,
+        errorMessage: e.toString(),
+      );
+    }
   }
 
-  void reset() =>
-      state = const ScheduleNotifierState();
+  void reset() => state = const ScheduleNotifierState();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../data/models/attendance_log_model.dart';
 import '../../../data/models/subject_model.dart';
-import '../../../data/repositories/attendance_repository.dart';
+import '../../../data/repositories/local_attendance_repository.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 
 part 'attendance_history_provider.g.dart';
@@ -110,7 +110,8 @@ class AttendanceStats {
 
 @riverpod
 Stream<List<AttendanceLogModel>> attendanceLogsStream(Ref ref) {
-  return ref.watch(attendanceRepositoryProvider).watchAllLogs();
+  // Phase 4: reads from local SQLite via model-adapter method.
+  return ref.watch(localAttendanceRepositoryProvider).watchAllLogsAsModels();
 }
 
 // ── Filter state ──────────────────────────────────────────────────────────────
@@ -244,7 +245,7 @@ class LogEditNotifier extends _$LogEditNotifier {
   ) async {
     state = const LogEditState(status: LogEditStatus.saving);
     try {
-      await ref.read(attendanceRepositoryProvider).updateLog(log, oldStatus);
+      await ref.read(localAttendanceRepositoryProvider).updateLog(log, oldStatus);
       state = const LogEditState(status: LogEditStatus.success);
     } catch (e) {
       state = LogEditState(
@@ -257,7 +258,7 @@ class LogEditNotifier extends _$LogEditNotifier {
   Future<void> deleteLog(AttendanceLogModel log) async {
     state = const LogEditState(status: LogEditStatus.saving);
     try {
-      await ref.read(attendanceRepositoryProvider).deleteLog(log);
+      await ref.read(localAttendanceRepositoryProvider).deleteLog(log);
       state = const LogEditState(status: LogEditStatus.success);
     } catch (e) {
       state = LogEditState(

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../../../data/repositories/auth_repository.dart';
+
 import '../providers/onboarding_notifier.dart';
 import '../providers/onboarding_state.dart';
 import '../widgets/onboarding_colors.dart';
@@ -117,31 +117,7 @@ class ObWelcomeScreen extends ConsumerWidget {
                 },
               ),
             ),
-            // Sign out option
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-              child: SizedBox(
-                width: double.infinity,
-                child: TextButton.icon(
-                  icon: const Icon(Icons.logout_rounded, size: 16),
-                  label: Text(
-                    'Sign Out',
-                    style: GoogleFonts.hankenGrotesk(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  onPressed: () async {
-                    await ref.read(authRepositoryProvider).signOut();
-                  },
-                  style: TextButton.styleFrom(
-                    foregroundColor: OnboardingColors.onSurfaceVariant,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: const StadiumBorder(),
-                  ),
-                ),
-              ),
-            ),
+
           ],
         ),
       ),

@@ -4,7 +4,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../data/models/timetable_entry_model.dart';
 import '../../../data/models/semester_model.dart';
-import '../../../data/repositories/timetable_repository.dart';
+import '../../../data/repositories/local_attendance_repository.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 import '../../profile/providers/profile_provider.dart';
 import '../models/leave_plan_result.dart';
@@ -16,14 +16,16 @@ part 'predictor_provider.g.dart';
 
 @riverpod
 Stream<List<TimetableEntry>> predictorEntriesStream(Ref ref) {
-  return ref.watch(timetableRepositoryProvider).watchTimetableEntries();
+  // Phase 4: reads from local SQLite via model-adapter method.
+  return ref.watch(localAttendanceRepositoryProvider).watchTimetableEntryModels();
 }
 
 // ─── Active semester (one-time fetch) ─────────────────────────────────────────
 
 @riverpod
 Future<Semester?> predictorSemester(Ref ref) {
-  return ref.watch(timetableRepositoryProvider).getActiveSemester();
+  // Phase 4: reads from local SQLite — holidays loaded from semester_holidays table.
+  return ref.watch(localAttendanceRepositoryProvider).getActiveSemesterModel();
 }
 
 // ─── Main predictor data (memoised — recomputes only when deps change) ────────

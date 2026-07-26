@@ -14,6 +14,12 @@ import '../../../features/timetable_editor/repository/timetable_editor_repositor
 ///
 /// All onboarding persistence goes through this class so screens/providers stay
 /// thin. Each method is idempotent (safe to call on resume/retry).
+///
+/// ⚠️  Phase 3 note: auth has been removed. _uid is always '' in this build.
+/// Every method that requires a Firestore document path guards against an empty
+/// uid and returns early (no-op) so the app never throws
+/// "document path must be a non-empty string".
+/// Full local-DB replacement of this class is planned for Phase 4.
 class OnboardingRepository {
   final FirestoreDatasource _db;
   final TimetableRepository _timetableRepo;
@@ -28,14 +34,24 @@ class OnboardingRepository {
         _timetableRepo = timetableRepo,
         _uid = uid;
 
+  // ─── Guard helper ─────────────────────────────────────────────────────────
+
+  /// True when uid is missing — all Firestore calls must no-op in this case.
+  bool get _noAuth => _uid.isEmpty;
+
   // ─── Step tracking ────────────────────────────────────────────────────────
 
-  Future<void> saveStep(String stepKey) =>
-      _db.updateOnboardingStep(_uid, stepKey);
+  Future<void> saveStep(String stepKey) async {
+    if (_noAuth) return; // Phase 3 guard — no uid, skip Firestore write
+    await _db.updateOnboardingStep(_uid, stepKey);
+  }
 
-  Future<void> markComplete() => _db.setOnboardingComplete(_uid);
+  Future<void> markComplete() async {
+    if (_noAuth) return; // Phase 3 guard
+    await _db.setOnboardingComplete(_uid);
+  }
 
-  // ─── College Details ─────────────────────────────────────────────────────
+  // ─── College Details ──────────────────────────────────────────────────────
 
   Future<void> saveCollegeDetails({
     required String collegeName,
@@ -43,6 +59,7 @@ class OnboardingRepository {
     String? year,
     String? section,
   }) async {
+    if (_noAuth) return; // Phase 3 guard
     await FirebaseFirestore.instance.collection('users').doc(_uid).set({
       'collegeName': collegeName,
       'courseName': courseName,
@@ -54,8 +71,8 @@ class OnboardingRepository {
 
   // ─── Semester Setup ───────────────────────────────────────────────────────
 
-  /// Saves the semester doc and updates the global attendance goal on user profile.
-  /// Returns the semester ID so callers can reference it (e.g. for holiday updates).
+  /// Saves the semester and returns a generated ID.
+  /// Returns a UUID even when no-auth so callers always receive a non-null id.
   Future<String> saveSemester({
     required DateTime startDate,
     required DateTime endDate,
@@ -64,6 +81,8 @@ class OnboardingRepository {
     List<DateTime> holidays = const [],
   }) async {
     final id = _uuid.v4();
+    if (_noAuth) return id; // Phase 3 guard — return id, skip Firestore
+
     final semester = Semester(
       id: id,
       uid: _uid,
@@ -84,8 +103,6 @@ class OnboardingRepository {
 
   // ─── Subject Setup ────────────────────────────────────────────────────────
 
-  /// Writes a single subject to Firestore. Safe to call multiple times (sets doc).
-  /// Auto-assigns [colorHex] and [shortName] on first creation if not provided.
   Future<String> saveSubject({
     required String name,
     String? faculty,
@@ -96,11 +113,12 @@ class OnboardingRepository {
     String? colorHex,
     String? shortName,
   }) async {
-    final now = DateTime.now();
     final id = existingId ?? _uuid.v4();
+    if (_noAuth) return id; // Phase 3 guard — return id, skip Firestore
+
+    final now = DateTime.now();
     DateTime createdAt = now;
     if (existingId != null) {
-      // Preserve the original creation timestamp so sort order is stable.
       final existing = await _db.getSubjectById(_uid, existingId);
       if (existing != null) {
         createdAt = existing.createdAt;
@@ -122,8 +140,6 @@ class OnboardingRepository {
       await _db.updateSubject(_uid, updated);
       return id;
     }
-    // Auto-assign color from palette (based on STORED colors only — effectiveColorHex
-    // would map every un-coloured subject to palette[0], making all slots appear used)
     final existingSubjects = await _db.getSubjects(_uid);
     final usedColors = existingSubjects
         .where((s) => s.colorHex != null)
@@ -148,16 +164,24 @@ class OnboardingRepository {
     return id;
   }
 
-  Future<void> deleteSubject(String subjectId) =>
-      _db.deleteSubject(_uid, subjectId);
+  Future<void> deleteSubject(String subjectId) async {
+    if (_noAuth) return; // Phase 3 guard
+    await _db.deleteSubject(_uid, subjectId);
+  }
 
-  Future<List<SubjectModel>> getSubjects() => _db.getSubjects(_uid);
+  Future<List<SubjectModel>> getSubjects() async {
+    if (_noAuth) return []; // Phase 3 guard
+    return _db.getSubjects(_uid);
+  }
 
-  Stream<List<SubjectModel>> watchSubjects() => _db.watchSubjects(_uid);
+  Stream<List<SubjectModel>> watchSubjects() {
+    if (_noAuth) return const Stream.empty(); // Phase 3 guard
+    return _db.watchSubjects(_uid);
+  }
 
-  /// Returns the Firestore document ID of the most recently created semester,
-  /// or null if none exists. Used by restoreFromFirestore to rehydrate semesterId.
+  /// Returns the active semester ID, or null.
   Future<String?> getActiveSemesterId() async {
+    if (_noAuth) return null; // Phase 3 guard
     final snap = await FirebaseFirestore.instance
         .collection('users')
         .doc(_uid)
@@ -169,14 +193,10 @@ class OnboardingRepository {
     return snap.docs.first.id;
   }
 
-  // ─── Timetable (delegates to timetable/config/lectures) ──────────────────
-  // No direct timetable_entries writes — the TimetableEditorNotifier handles
-  // all lecture CRUD via /users/{uid}/timetable/config/lectures.
-
   // ─── Holiday Calendar ─────────────────────────────────────────────────────
 
-  /// Overwrites the holidays list on the active semester document.
   Future<void> updateHolidays(String semesterId, List<DateTime> holidays) async {
+    if (_noAuth) return; // Phase 3 guard
     await FirebaseFirestore.instance
         .collection('users')
         .doc(_uid)
@@ -189,24 +209,19 @@ class OnboardingRepository {
 
   // ─── Attendance Import ────────────────────────────────────────────────────
 
-  /// Method A: manually entered attended/total counts.
-  /// Directly sets counters without creating individual log records.
   Future<void> saveManualCounts(
     Map<String, ({int attended, int total})> counts,
-  ) =>
-      _db.saveOnboardingManualCounts(_uid, counts);
+  ) async {
+    if (_noAuth) return; // Phase 3 guard
+    await _db.saveOnboardingManualCounts(_uid, counts);
+  }
 
-  /// Method B: mark absent dates → derive absent logs from timetable.
-  ///
-  /// For each subject in [absentDatesBySubject], generates one
-  /// AttendanceLogModel(status=absent) per absent date per lecture slot.
-  /// Reads lecture blocks directly from Firestore (timetable/config/lectures).
-  /// Log IDs are derived from subjectId+date+startTime so retries are idempotent.
   Future<void> saveAbsentDates({
     required Map<String, List<DateTime>> absentDatesBySubject,
     required Map<String, String> subjectIdToName,
   }) async {
-    // Read lectures from the canonical source
+    if (_noAuth) return; // Phase 3 guard
+
     final editorRepo = TimetableEditorRepository(
       firestore: FirebaseFirestore.instance,
       auth: FirebaseAuth.instance,
@@ -218,7 +233,6 @@ class OnboardingRepository {
       final subjectName = subjectIdToName[subjectId] ?? '';
       final subjectLectures =
           lectures.where((l) => l.subjectId == subjectId).toList();
-
       for (final date in dates) {
         final dayAbbr = kDayAbbreviations[_weekdayName(date.weekday)] ?? '';
         final dayLectures =
@@ -246,10 +260,8 @@ class OnboardingRepository {
 
   // ─── Review / Finalize ────────────────────────────────────────────────────
 
-  /// Generates class_sessions from the saved timetable + active semester.
-  /// Reads LectureBlocks from /users/{uid}/timetable/config/lectures.
-  /// Called when the user confirms on the Review screen.
   Future<void> generateClassSessions() async {
+    if (_noAuth) return; // Phase 3 guard
     final semester = await _timetableRepo.getActiveSemester();
     if (semester == null) return;
 

@@ -71,6 +71,9 @@ class _ObCollegeDetailsScreenState
       stepIndex: OnboardingStep.indexOf(OnboardingStep.college),
       totalSteps: OnboardingStep.all.length,
       showBack: true,
+      showSkip: true,
+      skipLabel: 'Skip All',
+      onSkip: () => notifier.skipAllAndComplete(context),
       onBack: () => context.go(OnboardingStep.routeFor(OnboardingStep.welcome)),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

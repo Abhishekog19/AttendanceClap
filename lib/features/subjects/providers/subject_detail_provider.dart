@@ -4,13 +4,9 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 // Use prefix 'calc' so its AttendanceStatus (excellent/good/safe/risky/critical) doesn't clash
 import '../../../core/utils/attendance_calculator.dart' as calc;
-// Log model's AttendanceStatus (present/absent/late/cancelled) is the default bare name
-import '../../../data/models/attendance_log_model.dart';
-// Hide class_session_model's conflicting AttendanceStatus enum
-import '../../../data/models/class_session_model.dart' hide AttendanceStatus;
+import '../../../data/local/database.dart' show AttendanceLog, ClassSession;
 import '../../../data/models/subject_model.dart';
-import '../../../data/repositories/attendance_repository.dart';
-import '../../../data/repositories/timetable_repository.dart';
+import '../../../data/repositories/local_attendance_repository.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 import '../../profile/providers/profile_provider.dart';
 
@@ -21,17 +17,16 @@ part 'subject_detail_provider.g.dart';
 @riverpod
 Stream<List<ClassSession>> upcomingSessions(Ref ref, String subjectId) {
   return ref
-      .watch(timetableRepositoryProvider)
-      .upcomingSessionsForSubject(subjectId);
+      .watch(localAttendanceRepositoryProvider)
+      .watchUpcomingSessionsForSubject(subjectId);
 }
 
 // ── Logs stream for a single subject ─────────────────────────────────────────
 
 @riverpod
-Stream<List<AttendanceLogModel>> subjectLogsStream(
-    Ref ref, String subjectId) {
+Stream<List<AttendanceLog>> subjectLogsStream(Ref ref, String subjectId) {
   return ref
-      .watch(attendanceRepositoryProvider)
+      .watch(localAttendanceRepositoryProvider)
       .watchLogsForSubject(subjectId);
 }
 
@@ -39,7 +34,11 @@ Stream<List<AttendanceLogModel>> subjectLogsStream(
 
 class SubjectDetailData {
   final SubjectModel subject;
-  final List<AttendanceLogModel> logs;
+
+  /// Drift [AttendanceLog] rows (replaces Firestore AttendanceLogModel).
+  /// Status is a raw String: 'present' | 'absent' | 'late' | 'cancelled' | 'notMarked'.
+  final List<AttendanceLog> logs;
+
   final List<ClassSession> upcomingSessions;
   final double goal;
 
@@ -77,18 +76,12 @@ class SubjectDetailData {
     final spots = <FlSpot>[];
     for (int i = 6; i >= 0; i--) {
       final day = now.subtract(Duration(days: i));
-      final dayLogs = logs
-          .where((l) =>
-              l.date.year == day.year &&
-              l.date.month == day.month &&
-              l.date.day == day.day)
-          .toList();
+      final dayMidnight =
+          DateTime.utc(day.year, day.month, day.day).millisecondsSinceEpoch;
+      final dayLogs = logs.where((l) => l.date == dayMidnight).toList();
       final total = dayLogs.length;
-      final present = dayLogs
-          .where((l) =>
-              l.status == AttendanceStatus.present ||
-              l.status == AttendanceStatus.late)
-          .length;
+      final present =
+          dayLogs.where((l) => l.status == 'present' || l.status == 'late').length;
       spots.add(
           FlSpot((6 - i).toDouble(), total == 0 ? 0 : (present / total) * 100));
     }
@@ -102,16 +95,19 @@ class SubjectDetailData {
     for (int w = 3; w >= 0; w--) {
       final weekEnd = now.subtract(Duration(days: w * 7));
       final weekStart = weekEnd.subtract(const Duration(days: 7));
+      final weekEndMs =
+          DateTime.utc(weekEnd.year, weekEnd.month, weekEnd.day)
+              .add(const Duration(days: 1))
+              .millisecondsSinceEpoch;
+      final weekStartMs =
+          DateTime.utc(weekStart.year, weekStart.month, weekStart.day)
+              .millisecondsSinceEpoch;
       final weekLogs = logs
-          .where((l) =>
-              l.date.isAfter(weekStart) && l.date.isBefore(weekEnd))
+          .where((l) => l.date >= weekStartMs && l.date < weekEndMs)
           .toList();
       final total = weekLogs.length;
-      final present = weekLogs
-          .where((l) =>
-              l.status == AttendanceStatus.present ||
-              l.status == AttendanceStatus.late)
-          .length;
+      final present =
+          weekLogs.where((l) => l.status == 'present' || l.status == 'late').length;
       spots.add(
           FlSpot((3 - w).toDouble(), total == 0 ? 0 : (present / total) * 100));
     }
@@ -120,12 +116,9 @@ class SubjectDetailData {
 
   // ── Log stats ─────────────────────────────────────────────────────────────
 
-  int get presentCount =>
-      logs.where((l) => l.status == AttendanceStatus.present).length;
-  int get absentCount =>
-      logs.where((l) => l.status == AttendanceStatus.absent).length;
-  int get lateCount =>
-      logs.where((l) => l.status == AttendanceStatus.late).length;
+  int get presentCount => logs.where((l) => l.status == 'present').length;
+  int get absentCount => logs.where((l) => l.status == 'absent').length;
+  int get lateCount => logs.where((l) => l.status == 'late').length;
 }
 
 // ── Subject detail period ─────────────────────────────────────────────────────
