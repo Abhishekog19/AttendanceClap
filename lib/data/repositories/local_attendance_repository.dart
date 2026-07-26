@@ -31,6 +31,13 @@ import '../local/daos/attendance_dao.dart';
 import '../local/daos/subjects_dao.dart';
 import '../local/session_generator.dart';
 import '../../core/router/app_lifecycle_state.dart' show appDatabaseProvider;
+// Firestore model types — used ONLY for adapter methods that feed existing UI
+// providers. Remove once screens are rewritten to Drift types.
+import '../models/class_session_model.dart' as fs;
+import '../models/daily_schedule_override_model.dart' as fs;
+import '../models/semester_model.dart' as fs;
+import '../models/timetable_entry_model.dart' as fs;
+
 
 part 'local_attendance_repository.g.dart';
 
@@ -434,6 +441,186 @@ class LocalAttendanceRepository {
     return (_db.select(_db.semesters)
           ..where((s) => s.id.equals(semId)))
         .getSingleOrNull();
+  }
+
+  // ── Active semester — Firestore model shape (for timetable + predictor) ──────
+
+  /// Returns the active [fs.Semester] (Firestore model shape) so that
+  /// existing predictor/timetable providers need no changes.
+  /// Holidays are loaded from the [SemesterHolidays] join table.
+  Future<fs.Semester?> getActiveSemesterModel() async {
+    final drift = await getActiveSemester();
+    if (drift == null) return null;
+    return _driftSemesterToModel(drift);
+  }
+
+  Future<fs.Semester> _driftSemesterToModel(Semester s) async {
+    final holidayRows = await (_db.select(_db.semesterHolidays)
+          ..where((h) => h.semesterId.equals(s.id)))
+        .get();
+    final holidays = holidayRows
+        .map((h) => DateTime.fromMillisecondsSinceEpoch(h.holidayDate))
+        .toList();
+    return fs.Semester(
+      id: s.id,
+      uid: '',
+      startDate: DateTime.fromMillisecondsSinceEpoch(s.startDate),
+      endDate: DateTime.fromMillisecondsSinceEpoch(s.endDate),
+      holidays: holidays,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(s.createdAt),
+      semesterName: s.name,
+    );
+  }
+
+  // ── Timetable entries — Firestore model shape (for predictor) ──────────────
+
+  static const _weekdayNames = [
+    '', 'Monday', 'Tuesday', 'Wednesday',
+    'Thursday', 'Friday', 'Saturday', 'Sunday',
+  ];
+
+  /// Streams timetable entries mapped to the Firestore [fs.TimetableEntry]
+  /// model shape (dayOfWeek int → "Monday" string, subjectId→subject name
+  /// resolved via subjects join).
+  Stream<List<fs.TimetableEntry>> watchTimetableEntryModels() {
+    return (_db.select(_db.timetableEntries)
+          ..orderBy([
+            (e) => OrderingTerm.asc(e.dayOfWeek),
+            (e) => OrderingTerm.asc(e.startTime),
+          ]))
+        .watch()
+        .asyncMap((entries) async {
+          final result = <fs.TimetableEntry>[];
+          for (final e in entries) {
+            final subject = await _subjectsDao.getSubjectById(e.subjectId);
+            result.add(fs.TimetableEntry(
+              id: e.id,
+              subjectId: e.subjectId,
+              subject: subject?.name ?? '',
+              day: _weekdayNames[e.dayOfWeek.clamp(1, 7)],
+              startTime: e.startTime,
+              endTime: e.endTime,
+              faculty: e.faculty,
+              room: e.room,
+              confidence: e.confidence,
+            ));
+          }
+          return result;
+        });
+  }
+
+  // ── Today sessions — Firestore model shape (for timetable provider) ────────
+
+  /// Streams today's class sessions mapped to the Firestore [fs.ClassSession]
+  /// model shape, so [timetable_provider.dart] needs no logic changes.
+  Stream<List<fs.ClassSession>> watchTodaySessionModels({
+    required DateTime date,
+    required String activeSemesterId,
+  }) {
+    final midnight =
+        DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch;
+    final sessionsStream = _attendanceDao.watchSessionsForDate(
+      dateMidnightMs: midnight,
+      semesterId: activeSemesterId,
+    );
+    return sessionsStream.asyncMap((sessions) async {
+      final result = <fs.ClassSession>[];
+      for (final s in sessions) {
+        final subject = await _subjectsDao.getSubjectById(s.subjectId);
+        if (subject == null) continue;
+        result.add(fs.ClassSession(
+          id: s.id,
+          subjectId: s.subjectId,
+          subjectName: subject.name,
+          date: DateTime.fromMillisecondsSinceEpoch(s.date),
+          startTime: s.startTime,
+          endTime: s.endTime,
+          faculty: s.faculty,
+          room: s.room,
+          status: _parseStatus(s.status),
+          uid: '',
+          isCancelled: s.isCancelled == 1,
+          isExtraPeriod: s.isExtraPeriod == 1,
+        ));
+      }
+      return result;
+    });
+  }
+
+  static fs.AttendanceStatus _parseStatus(String s) => switch (s) {
+        'present' => fs.AttendanceStatus.present,
+        'absent' => fs.AttendanceStatus.absent,
+        'late' => fs.AttendanceStatus.late,
+        'cancelled' => fs.AttendanceStatus.cancelled,
+        _ => fs.AttendanceStatus.notMarked,
+      };
+
+  // ── Daily overrides — Firestore model shape (for timetable provider) ────────
+
+  /// Streams daily schedule overrides for [date] mapped to the Firestore
+  /// [fs.DailyScheduleOverride] model shape.
+  Stream<List<fs.DailyScheduleOverride>> watchDailyOverrideModels(
+      DateTime date) {
+    final midnight =
+        DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch;
+    return (_db.select(_db.dailyScheduleOverrides)
+          ..where((o) => o.date.equals(midnight)))
+        .watch()
+        .map((rows) => rows
+            .map((o) => fs.DailyScheduleOverride(
+                  id: o.id,
+                  sessionId: o.sessionId,
+                  uid: '',
+                  date: DateTime.fromMillisecondsSinceEpoch(o.date),
+                  type: _parseOverrideType(o.overrideType),
+                  newSubjectId: o.newSubjectId,
+                  newStartTime: o.newStartTime,
+                  newEndTime: o.newEndTime,
+                  isCancelled: o.isCancelled == 1,
+                  isExtraPeriod: o.isExtraPeriod == 1,
+                  createdAt: DateTime.fromMillisecondsSinceEpoch(o.createdAt),
+                ))
+            .toList());
+  }
+
+  static fs.OverrideType _parseOverrideType(String s) => switch (s) {
+        'cancel' => fs.OverrideType.cancel,
+        'reschedule' => fs.OverrideType.reschedule,
+        'changeSubject' => fs.OverrideType.changeSubject,
+        _ => fs.OverrideType.addExtra,
+      };
+
+  // ── Mark attendance from ScheduleNotifier (Firestore model input) ───────────
+
+  /// Marks attendance for a session identified by the Firestore
+  /// [fs.ClassSession] model. Fetches the active semester id from
+  /// [AppSettings] so callers don't need to thread it through.
+  Future<void> markSessionAttendance({
+    required fs.ClassSession session,
+    required fs.AttendanceStatus status,
+  }) async {
+    final activeSemester = await getActiveSemester();
+    if (activeSemester == null) return;
+    await markAttendance(
+      sessionId: session.id,
+      status: status.name,
+      semesterId: activeSemester.id,
+    );
+  }
+
+  /// Marks a list of sessions absent. Skips already-marked and cancelled ones.
+  Future<void> markMultipleSessionsAbsent(
+      List<fs.ClassSession> sessions) async {
+    final activeSemester = await getActiveSemester();
+    if (activeSemester == null) return;
+    for (final s in sessions) {
+      if (s.status != fs.AttendanceStatus.notMarked || s.isCancelled) continue;
+      await markAttendance(
+        sessionId: s.id,
+        status: 'absent',
+        semesterId: activeSemester.id,
+      );
+    }
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ part of 'predictor_provider.dart';
 // **************************************************************************
 
 String _$predictorEntriesStreamHash() =>
-    r'bf8b70dba564ad26db420d80e26033c3ad3a7b41';
+    r'3c918153e36f79d9a47e3a791fad8bae864d5d3e';
 
 /// See also [predictorEntriesStream].
 @ProviderFor(predictorEntriesStream)
@@ -26,7 +26,7 @@ final predictorEntriesStreamProvider =
 // ignore: unused_element
 typedef PredictorEntriesStreamRef
     = AutoDisposeStreamProviderRef<List<TimetableEntry>>;
-String _$predictorSemesterHash() => r'87fab0194e4454e67ae53cc19f4ccf5d3b8d691b';
+String _$predictorSemesterHash() => r'751c1b11e91b306b4243b1fe57b569124ec27679';
 
 /// See also [predictorSemester].
 @ProviderFor(predictorSemester)
