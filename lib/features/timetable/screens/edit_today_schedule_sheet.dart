@@ -7,7 +7,7 @@ import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../data/models/class_session_model.dart';
 import '../../../data/models/daily_schedule_override_model.dart';
-import '../../../data/repositories/timetable_repository.dart';
+import '../../../data/repositories/local_attendance_repository.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 import '../providers/timetable_provider.dart';
 
@@ -33,7 +33,7 @@ class _EditTodayScheduleSheetState
         isDark ? AppColors.darkOnSurface : AppColors.onSurface;
     final onSurfaceVariant =
         isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
-    final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
+
 
     return DraggableScrollableSheet(
       initialChildSize: 0.7,
@@ -105,14 +105,14 @@ class _EditTodayScheduleSheetState
                         ),
                       )),
                   // Add Extra Period button
-                  const SizedBox(height: AppSpacing.sm),
+                  // Add Extra Period — DISABLED until Phase 5 implements
+                  // the anchoring class_sessions row for addExtra overrides.
+                  // TODO(Phase 5): re-enable and call _showAddExtraDialog.
                   OutlinedButton.icon(
-                    onPressed: () => _showAddExtraDialog(context),
+                    onPressed: null,
                     icon: const Icon(Icons.add),
-                    label: const Text('Add Extra Period'),
+                    label: const Text('Add Extra Period (Coming Soon)'),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: primary,
-                      side: BorderSide(color: primary),
                       padding: const EdgeInsets.symmetric(
                           vertical: AppSpacing.md),
                       shape: RoundedRectangleBorder(
@@ -155,7 +155,7 @@ class _EditTodayScheduleSheetState
   Future<void> _restoreSession(ClassSession session) async {
     // Delete the cancel override for this session
     final overrides = await ref
-        .read(timetableRepositoryProvider)
+        .read(localAttendanceRepositoryProvider)
         .getDailyOverridesForDate(session.date);
 
     final cancelOverride = overrides.where(
@@ -362,143 +362,6 @@ class _EditTodayScheduleSheetState
     }
   }
 
-  Future<void> _showAddExtraDialog(BuildContext context) async {
-    final subjects = ref.read(subjectsStreamProvider).valueOrNull ?? [];
-    if (subjects.isEmpty) return;
-
-    String? selectedId;
-    String? selectedName;
-    TimeOfDay startTime = const TimeOfDay(hour: 14, minute: 0);
-    TimeOfDay endTime = const TimeOfDay(hour: 15, minute: 0);
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: const Text('Add Extra Period'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Subject',
-                    style: TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                DropdownButtonFormField<String>(
-                  initialValue: selectedId,
-                  hint: const Text('Select subject'),
-                  onChanged: (v) {
-                    setS(() {
-                      selectedId = v;
-                      selectedName =
-                          subjects.firstWhere((s) => s.id == v).name;
-                    });
-                  },
-                  items: subjects
-                      .map((s) => DropdownMenuItem(
-                            value: s.id,
-                            child: Text(s.name),
-                          ))
-                      .toList(),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Start',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 4),
-                          OutlinedButton(
-                            onPressed: () async {
-                              final t = await showTimePicker(
-                                context: ctx,
-                                initialTime: startTime,
-                              );
-                              if (t != null) setS(() => startTime = t);
-                            },
-                            child: Text(_formatTimeOfDay(startTime)),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('End',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 4),
-                          OutlinedButton(
-                            onPressed: () async {
-                              final t = await showTimePicker(
-                                context: ctx,
-                                initialTime: endTime,
-                              );
-                              if (t != null) setS(() => endTime = t);
-                            },
-                            child: Text(_formatTimeOfDay(endTime)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel')),
-            FilledButton(
-                onPressed: selectedId == null
-                    ? null
-                    : () => Navigator.pop(ctx, true),
-                child: const Text('Add')),
-          ],
-        ),
-      ),
-    );
-
-    if (confirmed == true && selectedId != null && selectedName != null && mounted) {
-      // For extra periods, use a synthetic sessionId
-      final syntheticId = const Uuid().v4();
-      final override = DailyScheduleOverride(
-        id: syntheticId,
-        sessionId: syntheticId, // self-referential for extra periods
-        uid: ref.read(subjectsStreamProvider).valueOrNull?.firstOrNull?.id ?? '',
-        date: DateTime.now(),
-        type: OverrideType.addExtra,
-        newSubjectId: selectedId,
-        newSubjectName: selectedName,
-        newStartTime: _formatTimeOfDay(startTime),
-        newEndTime: _formatTimeOfDay(endTime),
-        isExtraPeriod: true,
-        createdAt: DateTime.now(),
-      );
-      await ref.read(scheduleNotifierProvider.notifier).saveOverride(override);
-      if (mounted) {
-        ScaffoldMessenger.of(context) // ignore: use_build_context_synchronously
-            .showSnackBar(
-          SnackBar(
-            content: Text(
-                'Extra period added: $selectedName '
-                '${_formatTimeOfDay(startTime)}–${_formatTimeOfDay(endTime)}'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
 
   TimeOfDay _parseTimeOfDay(String t) {
     final parts = t.split(':');

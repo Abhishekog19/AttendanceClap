@@ -97,6 +97,7 @@ class SubjectDetailData {
       final weekStart = weekEnd.subtract(const Duration(days: 7));
       final weekEndMs =
           DateTime.utc(weekEnd.year, weekEnd.month, weekEnd.day)
+              .add(const Duration(days: 1))
               .millisecondsSinceEpoch;
       final weekStartMs =
           DateTime.utc(weekStart.year, weekStart.month, weekStart.day)

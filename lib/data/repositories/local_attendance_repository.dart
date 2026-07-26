@@ -28,6 +28,7 @@ import 'package:uuid/uuid.dart';
 
 import '../local/database.dart';
 import '../local/daos/attendance_dao.dart';
+import '../local/daos/daily_overrides_dao.dart';
 import '../local/daos/subjects_dao.dart';
 import '../local/session_generator.dart';
 import '../../core/router/app_lifecycle_state.dart' show appDatabaseProvider;
@@ -37,6 +38,7 @@ import '../models/class_session_model.dart' as fs;
 import '../models/daily_schedule_override_model.dart' as fs;
 import '../models/semester_model.dart' as fs;
 import '../models/timetable_entry_model.dart' as fs;
+import '../models/attendance_log_model.dart' as fs;
 
 
 part 'local_attendance_repository.g.dart';
@@ -105,12 +107,14 @@ class LocalAttendanceRepository {
   final AppDatabase _db;
   late final AttendanceDao _attendanceDao;
   late final SubjectsDao _subjectsDao;
+  late final DailyOverridesDao _overridesDao;
   late final SessionGenerator _generator;
   static const _uuid = Uuid();
 
   LocalAttendanceRepository(this._db) {
     _attendanceDao = AttendanceDao(_db);
     _subjectsDao = SubjectsDao(_db);
+    _overridesDao = DailyOverridesDao(_db);
     _generator = SessionGenerator(_db);
   }
 
@@ -509,10 +513,196 @@ class LocalAttendanceRepository {
         });
   }
 
+  // ── Override write path ──────────────────────────────────────────────
+
+  /// Saves a daily schedule override and applies any counter effects.
+  ///
+  /// ## Cancel — counter and log policy
+  ///
+  /// A cancelled session must not count against attendance. Counter effects:
+  ///   - Session had a log (present/late): attendedDelta=-1, totalDelta=-1
+  ///   - Session had a log (absent):       totalDelta=-1
+  ///   - Session not yet marked:           totalDelta=-1
+  ///
+  /// **The log's status is NOT modified.** The override's presence alone signals
+  /// "this session is cancelled" via the override-JOIN in watchTodaySessionModels.
+  /// Leaving the log untouched means the original status (present/absent) is
+  /// recoverable exactly on uncancel — no data loss.
+  ///
+  /// class_sessions.status is also NOT changed; the override drives isCancelled
+  /// in the read path so changing the session row is both redundant and harmful.
+  ///
+  /// ## reschedule / changeSubject: no counter effect.
+  ///
+  /// ## addExtra: not supported — Phase 5.
+  ///
+  /// UNIQUE(session_id) on the overrides table: a second call for the same
+  /// session replaces the first (idempotent upsert).
+  Future<void> saveOverride(fs.DailyScheduleOverride override) async {
+    final midnight = DateTime.utc(
+      override.date.year,
+      override.date.month,
+      override.date.day,
+    ).millisecondsSinceEpoch;
+
+    final companion = DailyScheduleOverridesCompanion(
+      id: Value(override.id),
+      sessionId: Value(override.sessionId),
+      date: Value(midnight),
+      overrideType: Value(override.type.name),
+      newSubjectId: Value(override.newSubjectId),
+      newStartTime: Value(override.newStartTime),
+      newEndTime: Value(override.newEndTime),
+      isCancelled: Value(override.isCancelled ? 1 : 0),
+      isExtraPeriod: Value(override.isExtraPeriod ? 1 : 0),
+      createdAt: Value(DateTime.now().millisecondsSinceEpoch),
+    );
+
+    if (override.type == fs.OverrideType.cancel) {
+      await _db.transaction(() async {
+        final existingLog =
+            await _attendanceDao.getLogForSession(override.sessionId);
+
+        if (existingLog != null) {
+          // Reverse the log's counter contribution. Log status is LEFT INTACT.
+          final d =
+              _delta(oldStatus: existingLog.status, newStatus: 'cancelled');
+          if (d.attended != 0 || d.total != 0) {
+            await _subjectsDao.applyCounterDelta(
+              subjectId: existingLog.subjectId,
+              attendedDelta: d.attended,
+              totalDelta: d.total,
+            );
+          }
+        } else {
+          // Session not yet marked — remove it from the total.
+          final session = await (_db.select(_db.classSessions)
+                ..where((s) => s.id.equals(override.sessionId))
+                ..limit(1))
+              .getSingleOrNull();
+          if (session != null && session.status == 'notMarked') {
+            await _subjectsDao.applyCounterDelta(
+              subjectId: session.subjectId,
+              attendedDelta: 0,
+              totalDelta: -1,
+            );
+          }
+        }
+
+        // Do NOT call updateSessionStatus or updateLogStatus.
+        // The override row's presence drives isCancelled in the read path.
+        await _overridesDao.insertOrReplace(companion);
+      });
+    } else {
+      // reschedule / changeSubject: write override row only, no counter effect.
+      await _overridesDao.insertOrReplace(companion);
+    }
+  }
+
+  /// Deletes a daily schedule override and reverses its counter effects.
+  ///
+  /// ## Cancel uncancel — symmetric counter restore
+  ///
+  /// Because saveOverride(cancel) does NOT modify the log's status, the log
+  /// still holds the user's original marking (present / absent / none).
+  /// deleteOverride reads that original status and applies the exact inverse
+  /// delta, restoring counters to where they were before the cancel.
+  ///
+  ///   Log has 'present'/'late' : attendedDelta=+1, totalDelta=+1
+  ///   Log has 'absent'         : totalDelta=+1
+  ///   No log (was notMarked)   : totalDelta=+1
+  ///
+  /// class_sessions.status is also NOT changed; removing the override row
+  /// makes isCancelled = false in the read path automatically.
+  ///
+  /// reschedule / changeSubject: no counter changes.
+  Future<void> deleteOverride(String overrideId, DateTime date) async {
+    final ov = await (_db.select(_db.dailyScheduleOverrides)
+          ..where((o) => o.id.equals(overrideId))
+          ..limit(1))
+        .getSingleOrNull();
+    if (ov == null) return;
+
+    if (ov.overrideType == 'cancel') {
+      await _db.transaction(() async {
+        final existingLog = await _attendanceDao.getLogForSession(ov.sessionId);
+
+        if (existingLog != null) {
+          // Log's status is intact (saveOverride never changed it).
+          // Restore its counter contribution: cancelled → original status.
+          final d =
+              _delta(oldStatus: 'cancelled', newStatus: existingLog.status);
+          if (d.attended != 0 || d.total != 0) {
+            await _subjectsDao.applyCounterDelta(
+              subjectId: existingLog.subjectId,
+              attendedDelta: d.attended,
+              totalDelta: d.total,
+            );
+          }
+        } else {
+          // Session had no log when cancelled (totalDelta was -1 at cancel time).
+          // Restore the total by looking up the session's subjectId.
+          final session = await (_db.select(_db.classSessions)
+                ..where((s) => s.id.equals(ov.sessionId))
+                ..limit(1))
+              .getSingleOrNull();
+          if (session != null) {
+            await _subjectsDao.applyCounterDelta(
+              subjectId: session.subjectId,
+              attendedDelta: 0,
+              totalDelta: 1,
+            );
+          }
+        }
+
+        // Do NOT call updateSessionStatus or updateLogStatus.
+        // Deleting the override row makes isCancelled = false in the read path.
+        await _overridesDao.deleteById(overrideId);
+      });
+    } else {
+      // reschedule / changeSubject: delete override row only.
+      await _overridesDao.deleteById(overrideId);
+    }
+  }
+
+  /// Returns all overrides for [date] — used by [_restoreSession] in
+  /// [edit_today_schedule_sheet.dart] to find the cancel override to delete.
+  Future<List<fs.DailyScheduleOverride>> getDailyOverridesForDate(
+      DateTime date) async {
+    final midnight =
+        DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch;
+    final rows = await _overridesDao.getOverridesForDate(midnight);
+    return rows
+        .map((o) => fs.DailyScheduleOverride(
+              id: o.id,
+              sessionId: o.sessionId,
+              uid: '',
+              date: DateTime.fromMillisecondsSinceEpoch(o.date),
+              type: _parseOverrideType(o.overrideType),
+              newSubjectId: o.newSubjectId,
+              newStartTime: o.newStartTime,
+              newEndTime: o.newEndTime,
+              isCancelled: o.isCancelled == 1,
+              isExtraPeriod: o.isExtraPeriod == 1,
+              createdAt: DateTime.fromMillisecondsSinceEpoch(o.createdAt),
+            ))
+        .toList();
+  }
+
   // ── Today sessions — Firestore model shape (for timetable provider) ────────
 
   /// Streams today's class sessions mapped to the Firestore [fs.ClassSession]
-  /// model shape, so [timetable_provider.dart] needs no logic changes.
+  /// model shape WITH daily overrides already applied.
+  ///
+  /// Override logic is folded into this JOIN so that [session.displayStartTime]
+  /// and [session.displayEndTime] are override-aware by the time they reach
+  /// the provider — no separate override stream or _applyOverrides step needed.
+  ///
+  /// Override types handled:
+  ///   cancel        → isCancelled = true
+  ///   reschedule    → overrideStartTime / overrideEndTime populated
+  ///   changeSubject → overrideSubjectId / overrideSubjectName populated
+  ///   addExtra      → synthetic ClassSession appended at end of list
   Stream<List<fs.ClassSession>> watchTodaySessionModels({
     required DateTime date,
     required String activeSemesterId,
@@ -525,9 +715,45 @@ class LocalAttendanceRepository {
     );
     return sessionsStream.asyncMap((sessions) async {
       final result = <fs.ClassSession>[];
+
+      // Pre-fetch all overrides for today in one query.
+      final allOverrides = await (_db.select(_db.dailyScheduleOverrides)
+            ..where((o) => o.date.equals(midnight)))
+          .get();
+
+      final overrideBySession = <String, DailyScheduleOverride>{};
+      final extraOverrides = <DailyScheduleOverride>[];
+      for (final o in allOverrides) {
+        if (o.overrideType == 'addExtra') {
+          extraOverrides.add(o);
+        } else {
+          overrideBySession[o.sessionId] = o;
+        }
+      }
+
       for (final s in sessions) {
         final subject = await _subjectsDao.getSubjectById(s.subjectId);
         if (subject == null) continue;
+
+        final ov = overrideBySession[s.id];
+        String? overrideSubjectId;
+        String? overrideSubjectName;
+        String? overrideStartTime;
+        String? overrideEndTime;
+        bool isCancelled = s.isCancelled == 1;
+
+        if (ov != null) {
+          isCancelled = ov.overrideType == 'cancel';
+          overrideStartTime = ov.newStartTime;
+          overrideEndTime = ov.newEndTime;
+          overrideSubjectId = ov.newSubjectId;
+          if (overrideSubjectId != null) {
+            final overrideSub =
+                await _subjectsDao.getSubjectById(overrideSubjectId);
+            overrideSubjectName = overrideSub?.name;
+          }
+        }
+
         result.add(fs.ClassSession(
           id: s.id,
           subjectId: s.subjectId,
@@ -539,10 +765,33 @@ class LocalAttendanceRepository {
           room: s.room,
           status: _parseStatus(s.status),
           uid: '',
-          isCancelled: s.isCancelled == 1,
+          isCancelled: isCancelled,
           isExtraPeriod: s.isExtraPeriod == 1,
+          overrideSubjectId: overrideSubjectId,
+          overrideSubjectName: overrideSubjectName,
+          overrideStartTime: overrideStartTime,
+          overrideEndTime: overrideEndTime,
         ));
       }
+
+      // Synthesize extra-period sessions from addExtra overrides.
+      for (final extra in extraOverrides) {
+        if (extra.newSubjectId == null || extra.newStartTime == null) continue;
+        final extraSub =
+            await _subjectsDao.getSubjectById(extra.newSubjectId!);
+        result.add(fs.ClassSession(
+          id: extra.id,
+          subjectId: extra.newSubjectId!,
+          subjectName: extraSub?.name ?? 'Extra Period',
+          date: DateTime.fromMillisecondsSinceEpoch(midnight),
+          startTime: extra.newStartTime!,
+          endTime: extra.newEndTime ?? extra.newStartTime!,
+          status: fs.AttendanceStatus.notMarked,
+          uid: '',
+          isExtraPeriod: true,
+        ));
+      }
+
       return result;
     });
   }
@@ -589,6 +838,43 @@ class LocalAttendanceRepository {
         'changeSubject' => fs.OverrideType.changeSubject,
         _ => fs.OverrideType.addExtra,
       };
+
+  // ── All attendance logs — Firestore model shape (for analytics provider) ──────
+
+  /// Streams ALL attendance logs across all subjects, mapped to the Firestore
+  /// [fs.AttendanceLogModel] shape so that [analytics_provider.dart] and
+  /// [attendance_history_provider.dart] can switch data sources with a
+  /// single line change — no logic change needed in those providers.
+  Stream<List<fs.AttendanceLogModel>> watchAllLogsAsModels() {
+    return (_db.select(_db.attendanceLogs)
+          ..where((l) => l.isArchived.equals(0))
+          ..orderBy([(l) => OrderingTerm.desc(l.date)]))
+        .watch()
+        .map((rows) => rows
+            .map((l) => fs.AttendanceLogModel(
+                  id: l.id,
+                  subjectId: l.subjectId,
+                  sessionId: l.sessionId,
+                  date: DateTime.fromMillisecondsSinceEpoch(l.date),
+                  status: _parseStatus(l.status),
+                ))
+            .toList());
+  }
+
+  // ── Log edit/delete — Firestore repo interface (for attendance_history_provider) ─
+
+  /// Updates an existing log's status. Matches [AttendanceRepository.updateLog] API.
+  /// Delegates to [editAttendance] which owns the counter delta logic.
+  Future<void> updateLog(
+    fs.AttendanceLogModel log,
+    fs.AttendanceStatus oldStatus,
+  ) =>
+      editAttendance(logId: log.id, newStatus: log.status.name);
+
+  /// Hard-deletes a log and reverses its counter. Matches [AttendanceRepository.deleteLog] API.
+  /// Delegates to [deleteAttendance] which owns the counter delta logic.
+  Future<void> deleteLog(fs.AttendanceLogModel log) =>
+      deleteAttendance(log.id);
 
   // ── Mark attendance from ScheduleNotifier (Firestore model input) ───────────
 
@@ -648,8 +934,12 @@ class LocalAttendanceRepository {
   }
 
   static String _autoShortName(String name) {
-    final words = name.trim().split(RegExp(r'\s+'));
-    if (words.length == 1) return name.substring(0, name.length.clamp(0, 3)).toUpperCase();
+    final trimmed = name.trim();
+    final words = trimmed.split(RegExp(r'\s+'));
+    if (words.length == 1) {
+      return trimmed.substring(0, trimmed.length.clamp(0, 3)).toUpperCase();
+    }
     return words.map((w) => w.isNotEmpty ? w[0].toUpperCase() : '').join();
   }
+
 }
