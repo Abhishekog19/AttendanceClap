@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/utils/attendance_calculator.dart';
-import '../../../data/local/database.dart';
 import '../../../data/models/subject_model.dart';
 import '../../../data/repositories/local_attendance_repository.dart';
 import '../../profile/providers/profile_provider.dart';

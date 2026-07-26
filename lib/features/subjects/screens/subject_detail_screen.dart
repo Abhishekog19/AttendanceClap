@@ -9,14 +9,12 @@ import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
 // calc prefix so its AttendanceStatus (excellent/good/safe/risky/critical) doesn't clash
 import '../../../core/utils/attendance_calculator.dart' as calc;
-// Log model's AttendanceStatus (present/absent/late/cancelled) is default bare name
-import '../../../data/models/attendance_log_model.dart';
-// Hide class_session_model's conflicting AttendanceStatus
-import '../../../data/models/class_session_model.dart' hide AttendanceStatus;
+// Drift data classes — AttendanceLog and local ClassSession
+import '../../../data/local/database.dart' show AttendanceLog, ClassSession;
 import '../../../data/models/subject_model.dart';
-import '../../../data/repositories/subject_repository.dart';
 import '../../../shared/widgets/attendance_progress_ring.dart';
 import '../providers/subject_detail_provider.dart';
+import '../providers/subjects_provider.dart';
 
 class SubjectDetailScreen extends ConsumerWidget {
   final SubjectModel subject;
@@ -299,7 +297,7 @@ class SubjectDetailScreen extends ConsumerWidget {
       ),
     );
     if (confirmed == true) {
-      await ref.read(subjectRepositoryProvider).deleteSubject(s.id);
+      await ref.read(subjectsNotifierProvider.notifier).deleteSubject(s.id);
       return true;
     }
     return false;
@@ -627,7 +625,8 @@ class _TrendCard extends StatelessWidget {
 // ── Subject Log Tile ──────────────────────────────────────────────────────────
 
 class _SubjectLogTile extends StatelessWidget {
-  final AttendanceLogModel log;
+  /// Drift [AttendanceLog] — status is a raw String, date is millisecondsSinceEpoch.
+  final AttendanceLog log;
   final bool isDark;
 
   const _SubjectLogTile({required this.log, required this.isDark});
@@ -646,6 +645,8 @@ class _SubjectLogTile extends StatelessWidget {
     final color = _statusColor(log.status);
     final icon = _statusIcon(log.status);
     final label = _statusLabel(log.status);
+    // Drift stores date as millisecondsSinceEpoch (int)
+    final date = DateTime.fromMillisecondsSinceEpoch(log.date);
 
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpacing.xs),
@@ -661,7 +662,7 @@ class _SubjectLogTile extends StatelessWidget {
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
-              DateFormat('EEE, d MMM y').format(log.date),
+              DateFormat('EEE, d MMM y').format(date),
               style: AppTextStyles.bodyLg.copyWith(color: onSurface),
             ),
           ),
@@ -685,34 +686,35 @@ class _SubjectLogTile extends StatelessWidget {
     );
   }
 
-  Color _statusColor(AttendanceStatus s) => switch (s) {
-        AttendanceStatus.present => AppColors.success,
-        AttendanceStatus.absent => AppColors.error,
-        AttendanceStatus.late => AppColors.warning,
-        AttendanceStatus.cancelled => AppColors.outline,
-        AttendanceStatus.notMarked => AppColors.outline,
+  // Status helpers use plain String comparisons (Drift stores status as text).
+  Color _statusColor(String s) => switch (s) {
+        'present' => AppColors.success,
+        'absent' => AppColors.error,
+        'late' => AppColors.warning,
+        _ => AppColors.outline, // cancelled / notMarked
       };
 
-  IconData _statusIcon(AttendanceStatus s) => switch (s) {
-        AttendanceStatus.present => Icons.check_circle_rounded,
-        AttendanceStatus.absent => Icons.cancel_rounded,
-        AttendanceStatus.late => Icons.access_time_filled,
-        AttendanceStatus.cancelled => Icons.event_busy_rounded,
-        AttendanceStatus.notMarked => Icons.radio_button_unchecked,
+  IconData _statusIcon(String s) => switch (s) {
+        'present' => Icons.check_circle_rounded,
+        'absent' => Icons.cancel_rounded,
+        'late' => Icons.access_time_filled,
+        'cancelled' => Icons.event_busy_rounded,
+        _ => Icons.radio_button_unchecked,
       };
 
-  String _statusLabel(AttendanceStatus s) => switch (s) {
-        AttendanceStatus.present => 'Present',
-        AttendanceStatus.absent => 'Absent',
-        AttendanceStatus.late => 'Late',
-        AttendanceStatus.cancelled => 'Cancelled',
-        AttendanceStatus.notMarked => 'Not Marked',
+  String _statusLabel(String s) => switch (s) {
+        'present' => 'Present',
+        'absent' => 'Absent',
+        'late' => 'Late',
+        'cancelled' => 'Cancelled',
+        _ => 'Not Marked',
       };
 }
 
 // ── Session Tile ──────────────────────────────────────────────────────────────
 
 class _SessionTile extends StatelessWidget {
+  /// Drift [ClassSession] — date is millisecondsSinceEpoch (int).
   final ClassSession session;
   final bool isDark;
 
@@ -730,9 +732,11 @@ class _SessionTile extends StatelessWidget {
     final onSurfaceVariant =
         isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
     final now = DateTime.now();
-    final isToday = session.date.year == now.year &&
-        session.date.month == now.month &&
-        session.date.day == now.day;
+    // Drift stores date as millisecondsSinceEpoch (int, UTC midnight)
+    final sessionDate = DateTime.fromMillisecondsSinceEpoch(session.date);
+    final isToday = sessionDate.year == now.year &&
+        sessionDate.month == now.month &&
+        sessionDate.day == now.day;
 
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpacing.xs),
@@ -761,7 +765,7 @@ class _SessionTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isToday ? 'Today' : DateFormat('EEE, d MMM').format(session.date),
+                  isToday ? 'Today' : DateFormat('EEE, d MMM').format(sessionDate),
                   style: AppTextStyles.bodyLg.copyWith(
                       color: onSurface, fontWeight: FontWeight.w600),
                 ),
