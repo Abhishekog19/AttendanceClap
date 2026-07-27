@@ -10,7 +10,6 @@ import '../../../data/repositories/timetable_repository.dart';
 import '../../../data/models/timetable_entry_model.dart';
 import '../../../data/services/historical_sync_service.dart';
 import '../providers/semester_provider.dart';
-import '../providers/timetable_ocr_provider.dart';
 
 class SemesterSetupScreen extends ConsumerWidget {
   const SemesterSetupScreen({super.key});
@@ -18,9 +17,10 @@ class SemesterSetupScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final semState = ref.watch(semesterNotifierProvider);
-    final entries = ref.watch(editedTimetableProvider).values
-        .expand((e) => e)
-        .toList();
+    // Timetable entries come from the timetable grid editor.
+    // generateSchedule() falls back to reading timetable_entries from Firestore
+    // when an empty list is passed, so no additional provider watch is needed here.
+    const entries = <TimetableEntry>[];
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
     final bg = isDark ? AppColors.darkSurface : AppColors.background;
@@ -36,7 +36,8 @@ class SemesterSetupScreen extends ConsumerWidget {
     // Navigate on success
     ref.listen(semesterNotifierProvider, (prev, next) {
       if (prev?.generatedCount == null && next.generatedCount != null) {
-        context.pushReplacement('/timetable/schedule-preview');
+        // Navigate back to timetable after generation completes.
+        context.go('/timetable');
       }
       if (next.error != null && prev?.error != next.error) {
         ScaffoldMessenger.of(context).showSnackBar(
