@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../data/models/semester_model.dart';
 import '../../../data/models/timetable_entry_model.dart';
+import '../../../data/repositories/local_attendance_repository.dart';
 import '../../../data/repositories/timetable_repository.dart';
 import '../../../data/services/historical_sync_service.dart';
 
@@ -98,6 +99,58 @@ class SemesterNotifier extends _$SemesterNotifier {
       count += dayEntries * dates;
     }
     return count;
+  }
+
+  /// Generates class_sessions entirely from local SQLite — no Firestore.
+  ///
+  /// Steps:
+  ///   1. Write semester + holidays → local [semesters] + [semester_holidays] tables.
+  ///   2. Point [app_settings.active_semester_id] at the new semester.
+  ///   3. Call [SessionGenerator] to expand [timetable_entries] → [class_sessions].
+  ///
+  /// Returns the number of sessions inserted, or sets [state.error] on failure.
+  /// On success, [state.generatedCount] is set and the router transitions from
+  /// [AppLifecycleNeedsSemester] to [AppLifecycleReady] automatically (via the
+  /// app_settings watch in [appLifecycleStateProvider]).
+  Future<void> generateScheduleLocal({
+    required LocalAttendanceRepository localRepo,
+    String semesterName = '',
+  }) async {
+    if (!state.isValid) {
+      state = state.copyWith(error: 'Please select valid start and end dates.');
+      return;
+    }
+
+    state = state.copyWith(isGenerating: true, error: null, generationProgress: 0.0);
+
+    try {
+      final semId = const Uuid().v4();
+
+      // 1. Persist semester + holidays to local SQLite, update active_semester_id.
+      await localRepo.writeSemesterWithHolidays(
+        semesterId: semId,
+        name: semesterName,
+        startDate: state.startDate!,
+        endDate: state.endDate!,
+        holidays: state.holidays,
+      );
+
+      state = state.copyWith(generationProgress: 0.2);
+
+      // 2. Expand timetable_entries → class_sessions.
+      final count = await localRepo.generateSessionsForSemester(semId);
+
+      state = state.copyWith(
+        isGenerating: false,
+        generationProgress: 1.0,
+        generatedCount: count,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isGenerating: false,
+        error: 'Failed to generate schedule: $e',
+      );
+    }
   }
 
   Future<void> generateSchedule({

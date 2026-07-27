@@ -6,9 +6,9 @@ import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../data/repositories/timetable_repository.dart';
-import '../../../data/models/timetable_entry_model.dart';
-import '../../../data/services/historical_sync_service.dart';
+import '../../../core/router/app_lifecycle_state.dart' show appDatabaseProvider;
+import '../../../data/local/database.dart';
+import '../../../data/repositories/local_attendance_repository.dart';
 import '../providers/semester_provider.dart';
 
 class SemesterSetupScreen extends ConsumerWidget {
@@ -17,10 +17,10 @@ class SemesterSetupScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final semState = ref.watch(semesterNotifierProvider);
-    // Timetable entries come from the timetable grid editor.
-    // generateSchedule() falls back to reading timetable_entries from Firestore
-    // when an empty list is passed, so no additional provider watch is needed here.
-    const entries = <TimetableEntry>[];
+    final db = ref.watch(appDatabaseProvider);
+    // Count timetable entries saved in local SQLite to show in the banner.
+    final entryCountAsync = ref.watch(_localEntryCountProvider(db));
+    final entryCount = entryCountAsync.maybeWhen(data: (n) => n, orElse: () => 0);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
     final bg = isDark ? AppColors.darkSurface : AppColors.background;
@@ -29,9 +29,6 @@ class SemesterSetupScreen extends ConsumerWidget {
     final onSurface = isDark ? AppColors.darkOnSurface : AppColors.onSurface;
     final onSurfaceVariant =
         isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
-
-    final estimatedSessions =
-        ref.read(semesterNotifierProvider.notifier).estimateSessions(entries);
 
     // Navigate on success
     ref.listen(semesterNotifierProvider, (prev, next) {
@@ -156,8 +153,8 @@ class SemesterSetupScreen extends ConsumerWidget {
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: Text(
-                        '${semState.estimatedWeeks} weeks · ~$estimatedSessions sessions '
-                        'will be generated',
+                        '${semState.estimatedWeeks} weeks · '
+                         '$entryCount timetable slot${entryCount == 1 ? '' : 's'} found',
                         style: AppTextStyles.bodySm.copyWith(
                             color: Colors.green.shade700,
                             fontWeight: FontWeight.w600),
@@ -241,7 +238,7 @@ class SemesterSetupScreen extends ConsumerWidget {
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: semState.isValid
-                      ? () => _generate(ref, entries)
+                      ? () => _generate(ref)
                       : null,
                   icon: const Icon(Icons.rocket_launch),
                   label: const Text('Generate Semester Schedule'),
@@ -301,16 +298,26 @@ class SemesterSetupScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _generate(WidgetRef ref, List<TimetableEntry> entries) async {
-    final repo = ref.read(timetableRepositoryProvider);
-    final syncService = ref.read(historicalSyncServiceProvider);
-    await ref.read(semesterNotifierProvider.notifier).generateSchedule(
-          entries: entries,
-          repo: repo,
-          historicalSync: syncService,
+  Future<void> _generate(WidgetRef ref) async {
+    final localRepo = ref.read(localAttendanceRepositoryProvider);
+    await ref.read(semesterNotifierProvider.notifier).generateScheduleLocal(
+          localRepo: localRepo,
+          // Semester name is optional; the screen doesn't have a name field.
+          semesterName: '',
         );
   }
 }
+
+// ── Local entry count provider ────────────────────────────────────────────────
+
+/// Counts all [TimetableEntries] rows in the local SQLite database.
+/// Used by [SemesterSetupScreen] to display how many timetable slots are
+/// already saved before the user triggers session generation.
+final _localEntryCountProvider =
+    FutureProvider.family<int, AppDatabase>((ref, db) async {
+  final rows = await db.select(db.timetableEntries).get();
+  return rows.length;
+});
 
 // ── Date Picker Card ──────────────────────────────────────────────────────────
 
