@@ -124,8 +124,10 @@ class LocalAttendanceRepository {
   Future<int> generateSessionsForSemester(String semesterId) =>
       _generator.generateSessionsForSemester(semesterId);
 
-  /// Writes a semester row to local SQLite, inserts its holiday dates into
-  /// [semester_holidays], and points [app_settings.active_semester_id] at it.
+  /// Writes a semester row to local SQLite and inserts its holiday dates into
+  /// [semester_holidays]. Does NOT activate the semester (i.e. does NOT write
+  /// [app_settings.active_semester_id]). Call [activateSemester] after
+  /// confirming that session generation succeeded.
   ///
   /// Uses INSERT OR REPLACE so it is safe to call again if the user retries
   /// after a partial failure. Holidays are inserted one-by-one inside a
@@ -169,13 +171,18 @@ class LocalAttendanceRepository {
             );
       }
     });
+  }
 
-    // 3. Point app_settings at this semester (outside the transaction — safe).
+  /// Points [app_settings.active_semester_id] at [semesterId].
+  ///
+  /// Call this AFTER session generation succeeds so the router only transitions
+  /// to [AppLifecycleReady] once the semester is fully populated with sessions.
+  Future<void> activateSemester(String semesterId) async {
     await _db.into(_db.appSettings).insertOnConflictUpdate(
           AppSettingsCompanion(
             id: const Value(1),
             activeSemesterId: Value(semesterId),
-            updatedAt: Value(now),
+            updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
           ),
         );
   }

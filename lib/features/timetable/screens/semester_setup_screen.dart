@@ -314,9 +314,8 @@ class SemesterSetupScreen extends ConsumerWidget {
 /// Used by [SemesterSetupScreen] to display how many timetable slots are
 /// already saved before the user triggers session generation.
 final _localEntryCountProvider =
-    FutureProvider.family<int, AppDatabase>((ref, db) async {
-  final rows = await db.select(db.timetableEntries).get();
-  return rows.length;
+    StreamProvider.family<int, AppDatabase>((ref, db) {
+  return db.select(db.timetableEntries).watch().map((rows) => rows.length);
 });
 
 // ── Date Picker Card ──────────────────────────────────────────────────────────

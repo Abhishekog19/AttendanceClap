@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
-
 import '../../../core/router/app_lifecycle_state.dart' show appDatabaseProvider;
 import '../../../data/local/database.dart';
 import '../../../data/models/subject_model.dart';

@@ -104,14 +104,12 @@ class SemesterNotifier extends _$SemesterNotifier {
   /// Generates class_sessions entirely from local SQLite — no Firestore.
   ///
   /// Steps:
-  ///   1. Write semester + holidays → local [semesters] + [semester_holidays] tables.
-  ///   2. Point [app_settings.active_semester_id] at the new semester.
+  ///   1. Pre-flight: reject if no timetable_entries exist for any semester.
+  ///   2. Write semester + holidays → local [semesters] + [semester_holidays].
   ///   3. Call [SessionGenerator] to expand [timetable_entries] → [class_sessions].
-  ///
-  /// Returns the number of sessions inserted, or sets [state.error] on failure.
-  /// On success, [state.generatedCount] is set and the router transitions from
-  /// [AppLifecycleNeedsSemester] to [AppLifecycleReady] automatically (via the
-  /// app_settings watch in [appLifecycleStateProvider]).
+  ///   4. Activate the semester (write [app_settings.active_semester_id]) ONLY
+  ///      after generation succeeds with count > 0. This ensures the router
+  ///      only transitions to [AppLifecycleReady] once sessions actually exist.
   Future<void> generateScheduleLocal({
     required LocalAttendanceRepository localRepo,
     String semesterName = '',
@@ -126,7 +124,22 @@ class SemesterNotifier extends _$SemesterNotifier {
     try {
       final semId = const Uuid().v4();
 
-      // 1. Persist semester + holidays to local SQLite, update active_semester_id.
+      // 1. Pre-flight: check that timetable_entries exist before writing anything.
+      //    generateSessionsForSemester() needs entries in the DB keyed to semId,
+      //    but entries are keyed to a semester_id written by the timetable editor.
+      //    A count of 0 here means the user skipped the timetable step — surface
+      //    a clear error rather than producing an empty semester.
+      final entryCount = await localRepo.countAllTimetableEntries();
+      if (entryCount == 0) {
+        state = state.copyWith(
+          isGenerating: false,
+          error: 'No timetable slots found. '
+              'Please add your class schedule in the timetable editor first.',
+        );
+        return;
+      }
+
+      // 2. Persist semester + holidays. Does NOT activate (no app_settings write).
       await localRepo.writeSemesterWithHolidays(
         semesterId: semId,
         name: semesterName,
@@ -137,8 +150,23 @@ class SemesterNotifier extends _$SemesterNotifier {
 
       state = state.copyWith(generationProgress: 0.2);
 
-      // 2. Expand timetable_entries → class_sessions.
+      // 3. Expand timetable_entries → class_sessions.
       final count = await localRepo.generateSessionsForSemester(semId);
+
+      // 4. Activate only after generation succeeds.
+      //    If count == 0 (entries exist globally but none link to this semId —
+      //    which can happen if the timetable editor stored them under a different
+      //    semester_id), surface an error and leave the semester inactive.
+      if (count == 0) {
+        state = state.copyWith(
+          isGenerating: false,
+          error: 'Timetable slots exist but could not be linked to this semester. '
+              'Please check that your timetable was saved with the correct semester.',
+        );
+        return;
+      }
+
+      await localRepo.activateSemester(semId);
 
       state = state.copyWith(
         isGenerating: false,
