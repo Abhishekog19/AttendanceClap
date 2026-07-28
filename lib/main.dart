@@ -13,7 +13,7 @@ import 'firebase_options.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load environment variables (Groq API key, Razorpay key, etc.)
+  // Load environment variables (Razorpay key, etc.)
   await dotenv.load(fileName: '.env');
 
   // Firebase.initializeApp is retained for Firestore and Crashlytics.

@@ -53,24 +53,14 @@ dependencies:
   # Icons
   cupertino_icons: ^1.0.8
 
-  # Timetable OCR feature
-  image_picker: ^1.1.2
-  file_picker: ^8.1.4
+  # ── File & image picking (profile photo, document import) ───────────────
+  # Note: image_picker and file_picker removed — timetable is manual-entry only.
 
-  # ── ML Kit OCR (on-device, no server needed) ─────────────────────────────
-  google_mlkit_text_recognition: ^0.13.1
-
-  # ── Groq API (structured timetable parsing via LLaMA) ──────────────────
-  http: ^1.2.2
-
-  # ── PDF rendering (PDF pages → images for OCR) ───────────────────────
-  pdfx: ^2.6.0
-
-  # ── Temp directory for PDF rendering ─────────────────────────────────
-  path_provider: ^2.1.4
-
-  # Env config (for Gemini API key)
+  # ── Env config (Razorpay key, etc.) ──────────────────────────────────────
   flutter_dotenv: ^5.2.1
+
+  # ── Temp directory (SQLite path resolution) ───────────────────────────────
+  path_provider: ^2.1.4
 
   #Razorpay
   razorpay_flutter: 1.4.0

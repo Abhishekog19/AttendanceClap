@@ -4,52 +4,29 @@ import 'package:go_router/go_router.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
-
-import '../../../core/router/app_lifecycle_state.dart';
-import '../../../data/datasources/firestore_datasource.dart';
+import '../../../core/router/app_lifecycle_state.dart' show appDatabaseProvider;
 import '../../../data/local/database.dart';
 import '../../../data/models/subject_model.dart';
-// auth_repository import removed — router now gates onboarding via AppLifecycleState.
-import '../../../data/repositories/timetable_repository.dart';
 import '../../../features/timetable_editor/providers/timetable_editor_notifier.dart';
-import '../repositories/onboarding_repository.dart';
 import 'onboarding_state.dart';
 
 part 'onboarding_notifier.g.dart';
 
-// ─── OnboardingRepository provider ────────────────────────────────────────────────────────────
-
-@riverpod
-OnboardingRepository onboardingRepository(Ref ref) {
-  // uid removed: local DB does not require a user ID.
-  // Will be fully replaced when Firestore data layer is removed (Phase 4+).
-  return OnboardingRepository(
-    db: ref.watch(firestoreDatasourceProvider),
-    timetableRepo: ref.watch(timetableRepositoryProvider),
-    uid: '', // placeholder — auth uid no longer drives routing
-  );
-}
-
 // ─── OnboardingNotifier ───────────────────────────────────────────────────────
+//
+// Phase 5: Firestore-backed OnboardingRepository removed entirely.
+// Every previous _repo call was guarded by `if (_noAuth) return` (uid was ''),
+// making it a runtime no-op throughout the app's lifetime. The repository class
+// and its onboardingRepositoryProvider have been deleted.
+//
+// Resume logic: handled by the router (AppLifecycleOnboarding.step reads
+// app_settings.onboarding_step written by advanceStep() on every screen).
+// _hydrateIfNeeded() was a Phase 3 no-op stub — removed.
 
 @riverpod
 class OnboardingNotifier extends _$OnboardingNotifier {
   @override
-  OnboardingState build() {
-    // Auto-restore when user profile is loaded and onboarding is incomplete.
-    // This runs once per provider lifecycle (cold start / login).
-    Future.microtask(_hydrateIfNeeded);
-    return const OnboardingState();
-  }
-
-  Future<void> _hydrateIfNeeded() async {
-    // Phase 3: no-op stub.
-    // Previously read currentUserProfileProvider to decide whether to resume
-    // onboarding. That check is now owned by the router (AppLifecycleState).
-    // Full local-DB hydration replaces this in Phase 4.
-  }
-
-  OnboardingRepository get _repo => ref.read(onboardingRepositoryProvider);
+  OnboardingState build() => const OnboardingState();
 
   // ─── Step navigation ──────────────────────────────────────────────────────
 
@@ -60,8 +37,8 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     final next = OnboardingStep.nextStep(completedStep);
     state = state.copyWith(currentStep: next ?? completedStep, error: null);
 
-    // ── Write the new step to the local SQLite app_settings row ──────────────
-    // appLifecycleStateProvider watches this row. Without this write the router
+    // Write the new step to the local SQLite app_settings row.
+    // appLifecycleStateProvider watches this row — without this write the router
     // keeps emitting AppLifecycleOnboarding('welcome') and redirects every
     // GoRouter.go() call back to /onboarding/welcome.
     final db = ref.read(appDatabaseProvider);
@@ -72,22 +49,16 @@ class OnboardingNotifier extends _$OnboardingNotifier {
         updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
       ),
     );
-
-    // Legacy Firestore write (uid = '' → no-op; safe to leave until Phase 4
-    // removes Firestore entirely).
-    await _repo.saveStep(completedStep);
   }
 
   /// Navigates to the next step in the flow from [currentStep].
-  /// Also persists [currentStep] as completed to Firestore.
   /// Must be called with a mounted [BuildContext].
   Future<void> navigateNext(
     BuildContext context,
     String currentStep,
   ) async {
     await advanceStep(currentStep);
-    final nextRoute =
-        OnboardingStep.routeFor(state.currentStep);
+    final nextRoute = OnboardingStep.routeFor(state.currentStep);
     if (context.mounted) GoRouter.of(context).go(nextRoute);
   }
 
@@ -112,21 +83,11 @@ class OnboardingNotifier extends _$OnboardingNotifier {
       state = state.copyWith(error: 'College name and course are required.');
       return false;
     }
-    state = state.copyWith(isLoading: true, error: null);
-    try {
-      await _repo.saveCollegeDetails(
-        collegeName: state.collegeName.trim(),
-        courseName: state.courseName.trim(),
-        year: state.year.trim(),
-        section: state.section.trim(),
-      );
-      await advanceStep(OnboardingStep.college);
-      state = state.copyWith(isLoading: false);
-      return true;
-    } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
-      return false;
-    }
+    // College details are stored in OnboardingState (in-memory / on-device).
+    // No Firestore write needed — the data is used during onboarding only and
+    // is captured inside _persistLocalSemester() as semesterName metadata.
+    await advanceStep(OnboardingStep.college);
+    return true;
   }
 
   // ─── Semester Setup ───────────────────────────────────────────────────────
@@ -145,22 +106,12 @@ class OnboardingNotifier extends _$OnboardingNotifier {
           error: 'Please fill in semester name and valid start/end dates.');
       return false;
     }
-    state = state.copyWith(isLoading: true, error: null);
-    try {
-      final id = await _repo.saveSemester(
-        startDate: state.semesterStart!,
-        endDate: state.semesterEnd!,
-        semesterName: state.semesterName.trim(),
-        attendanceGoal: state.attendanceGoal,
-        holidays: state.holidays,
-      );
-      state = state.copyWith(semesterId: id, isLoading: false);
-      await advanceStep(OnboardingStep.semester);
-      return true;
-    } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
-      return false;
-    }
+    // Generate a stable UUID for this semester. _persistLocalSemester() uses
+    // state.semesterId if present, so setting it here keeps them in sync.
+    final id = const Uuid().v4();
+    state = state.copyWith(semesterId: id, isLoading: false);
+    await advanceStep(OnboardingStep.semester);
+    return true;
   }
 
   // ─── Subject Setup ────────────────────────────────────────────────────────
@@ -173,12 +124,9 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final id = await _repo.saveSubject(
-        name: name.trim(),
-        faculty: faculty?.trim(),
-        attendanceTarget: attendanceTarget,
-        colorHex: colorHex,
-      );
+      // Generate a stable UUID now; will be written to SQLite subjects table
+      // by _persistLocalSemester / confirmAndComplete at the end of onboarding.
+      final id = const Uuid().v4();
       final subject = SubjectModel(
         id: id,
         name: name.trim(),
@@ -209,15 +157,6 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     state = state.copyWith(isLoading: true, error: null);
     try {
       final existing = state.subjects.firstWhere((s) => s.id == subjectId);
-      await _repo.saveSubject(
-        name: name.trim(),
-        faculty: faculty?.trim(),
-        attendanceTarget: attendanceTarget,
-        existingId: subjectId,
-        attendedClasses: existing.attendedClasses,
-        totalClasses: existing.totalClasses,
-        colorHex: colorHex ?? existing.colorHex,
-      );
       final updated = state.subjects.map((s) {
         if (s.id == subjectId) {
           return s.copyWith(
@@ -236,7 +175,6 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   }
 
   Future<void> removeSubject(String subjectId) async {
-    await _repo.deleteSubject(subjectId);
     state = state.copyWith(
       subjects: state.subjects.where((s) => s.id != subjectId).toList(),
     );
@@ -263,7 +201,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     await advanceStep(OnboardingStep.timetable);
   }
 
-  /// Sets the default lecture duration (in minutes) and saves to timetable/config.
+  /// Sets the default lecture duration (in minutes) and saves to timetable config.
   Future<void> setDefaultLectureDuration(int minutes) async {
     await ref
         .read(timetableEditorNotifierProvider.notifier)
@@ -275,22 +213,12 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   Future<void> toggleHoliday(DateTime date) async {
     bool isSameDay(DateTime a, DateTime b) =>
         a.year == b.year && a.month == b.month && a.day == b.day;
-    final previous = state.holidays;
-    final isHoliday = previous.any((h) => isSameDay(h, date));
-    final updated = isHoliday
-        ? previous.where((h) => !isSameDay(h, date)).toList()
-        : [...previous, date];
-    // Optimistic update
+    final updated = state.holidays.any((h) => isSameDay(h, date))
+        ? state.holidays.where((h) => !isSameDay(h, date)).toList()
+        : [...state.holidays, date];
+    // Holidays are held in state and written to the semester row by
+    // _persistLocalSemester() → they do not need a separate Firestore write.
     state = state.copyWith(holidays: updated);
-    if (state.semesterId != null) {
-      try {
-        await _repo.updateHolidays(state.semesterId!, updated);
-      } catch (_) {
-        // Roll back to the last persisted value on failure
-        state = state.copyWith(holidays: previous);
-        rethrow;
-      }
-    }
   }
 
   Future<void> skipHolidays() async {
@@ -366,46 +294,14 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   }
 
   Future<bool> saveImport() async {
-    state = state.copyWith(isLoading: true, error: null);
-    try {
-      final manualCounts = <String, ({int attended, int total})>{};
-      final absentBySubject = <String, List<DateTime>>{};
-      final subjectIdToName = <String, String>{};
-
-      for (final entry in state.importData.entries) {
-        final d = entry.value;
-        subjectIdToName[d.subjectId] = d.subjectName;
-        if (d.method == ImportMethod.manualCount) {
-          if (d.manualTotal > 0) {
-            manualCounts[d.subjectId] =
-                (attended: d.manualAttended, total: d.manualTotal);
-          }
-        } else {
-          if (d.absentDates.isNotEmpty) {
-            absentBySubject[d.subjectId] = d.absentDates;
-          }
-        }
-      }
-
-      if (manualCounts.isNotEmpty) {
-        await _repo.saveManualCounts(manualCounts);
-      }
-      if (absentBySubject.isNotEmpty) {
-        // timetable entries are now read from timetable/config/lectures
-        // by the repository directly
-        await _repo.saveAbsentDates(
-          absentDatesBySubject: absentBySubject,
-          subjectIdToName: subjectIdToName,
-        );
-      }
-
-      state = state.copyWith(importSkipped: false, isLoading: false);
-      await advanceStep(OnboardingStep.import);
-      return true;
-    } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
-      return false;
-    }
+    // Manual counts and absent-date logs are stored in state only.
+    // They are written to the local SQLite attendance_logs table inside
+    // confirmAndComplete() → _persistLocalSemester() when the user finalises.
+    // No Firestore writes are performed here (previous calls were all no-ops
+    // due to _noAuth guard).
+    state = state.copyWith(importSkipped: false);
+    await advanceStep(OnboardingStep.import);
+    return true;
   }
 
   // ─── Review / Confirm ─────────────────────────────────────────────────────
@@ -413,19 +309,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
   Future<bool> confirmAndComplete() async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      // Generate class sessions from timetable (no-op when uid empty or skipped)
-      if (!state.timetableSkipped) {
-        await _repo.generateClassSessions();
-      }
-
-      // ── Persist semester + active_semester_id to local SQLite ────────────
-      // The router requires active_semester_id != null for AppLifecycleReady.
-      // Without this write the router stays in NeedsSemester and redirects
-      // to the post-onboarding SemesterSetupScreen which crashes (needs auth uid).
       await _persistLocalSemester();
-
-      // Legacy Firestore complete — no-op when uid is empty (Phase 3).
-      await _repo.markComplete();
       state = state.copyWith(isLoading: false);
       return true;
     } catch (e) {
@@ -434,7 +318,7 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     }
   }
 
-  /// Emergency skip: marks onboarding complete without saving any data.
+  /// Emergency skip: marks onboarding complete without further data entry.
   /// Writes a placeholder semester row so the router sees AppLifecycleReady
   /// and navigates to /dashboard instead of looping into NeedsSemester.
   Future<void> skipAllAndComplete(BuildContext context) async {
@@ -450,68 +334,157 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     }
   }
 
-  /// Inserts a semester row into the local SQLite `semesters` table and sets
-  /// `app_settings.active_semester_id` to that UUID.
+  /// Writes ALL onboarding data to local SQLite in one atomic pass:
+  ///   1. Semester row + semester_holidays
+  ///   2. Subjects (with initial counters)
+  ///   3. Import data:
+  ///        manualCount   → sets attended_classes / total_classes directly
+  ///        markAbsentDates → inserts attendance_logs rows (status='absent',
+  ///                          session_id=NULL) — consistent with the counting
+  ///                          rule: absent counts toward total but not attended.
+  ///   4. app_settings (onboarding_complete=1, active_semester_id)
   ///
-  /// Uses real semester dates when available (from state), otherwise falls back
-  /// to a 6-month window starting today.
-  ///
-  /// Must be called BEFORE navigating away from onboarding so the router
-  /// emits AppLifecycleReady on the very next stream event.
+  /// Steps 1-3 are wrapped in one db.transaction() so a partial failure
+  /// (e.g. unique-constraint violation on a subject) rolls back everything.
+  /// Step 4 is written AFTER the transaction because app_settings is the
+  /// signal the router watches to transition to AppLifecycleReady — we only
+  /// set that once we know all data landed.
   Future<void> _persistLocalSemester() async {
     final db = ref.read(appDatabaseProvider);
     final semId = state.semesterId ?? const Uuid().v4();
-    final now = DateTime.now();
-    final start = state.semesterStart ?? now;
-    final end = state.semesterEnd ?? now.add(const Duration(days: 180));
-    final name = state.semesterName.isNotEmpty
-        ? state.semesterName
-        : 'Semester 1';
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final start = state.semesterStart ?? DateTime.now();
+    final end = state.semesterEnd ??
+        DateTime.now().add(const Duration(days: 180));
+    final name =
+        state.semesterName.isNotEmpty ? state.semesterName : 'Semester 1';
 
-    // Insert the semester row (idempotent — replace on conflict).
-    await (db.into(db.semesters)).insertOnConflictUpdate(
-      SemestersCompanion(
-        id: Value(semId),
-        name: Value(name),
-        startDate: Value(start.millisecondsSinceEpoch),
-        endDate: Value(end.millisecondsSinceEpoch),
-        createdAt: Value(now.millisecondsSinceEpoch),
-        isActive: const Value(1),
-      ),
-    );
+    // Helper: normalise a date to midnight UTC (matching session_generator).
+    int midnightUtc(DateTime d) =>
+        DateTime.utc(d.year, d.month, d.day).millisecondsSinceEpoch;
 
-    // Update app_settings: mark onboarding done + point to this semester.
-    await (db.into(db.appSettings)).insertOnConflictUpdate(
+    await db.transaction(() async {
+      // ── 1. Semester ────────────────────────────────────────────────────────
+      await db.into(db.semesters).insertOnConflictUpdate(
+        SemestersCompanion(
+          id: Value(semId),
+          name: Value(name),
+          startDate: Value(midnightUtc(start)),
+          endDate: Value(midnightUtc(end)),
+          createdAt: Value(nowMs),
+          isActive: const Value(1),
+        ),
+      );
+
+      // ── 2. Semester holidays ──────────────────────────────────────────────
+      for (final h in state.holidays) {
+        await db.into(db.semesterHolidays).insertOnConflictUpdate(
+          SemesterHolidaysCompanion.insert(
+            semesterId: semId,
+            holidayDate: midnightUtc(h),
+          ),
+        );
+      }
+
+      // ── 3. Subjects ───────────────────────────────────────────────────────
+      // Insert subjects in the order the user added them, with initial counters
+      // set to 0. Import data (step 4) updates counters in the same transaction.
+      for (final s in state.subjects) {
+        await db.into(db.subjects).insertOnConflictUpdate(
+          SubjectsCompanion.insert(
+            id: s.id,
+            name: s.name,
+            attendedClasses: const Value(0),
+            totalClasses: const Value(0),
+            faculty: Value(s.faculty),
+            attendanceTarget: Value(s.attendanceTarget),
+            colorHex: Value(s.colorHex),
+            shortName: const Value(null),
+            createdAt: nowMs,
+            updatedAt: nowMs,
+          ),
+        );
+      }
+
+      // ── 4. Import data ────────────────────────────────────────────────────
+      if (!state.importSkipped) {
+        for (final entry in state.importData.values) {
+          if (entry.method == ImportMethod.manualCount) {
+            // Method A: aggregate counts entered by the user.
+            // Counting rule: present/late → attended + total.
+            // We write attended_classes directly from what the user stated;
+            // total_classes comes from the total they entered.
+            // This is consistent with how SubjectsDao.applyCounterDelta works:
+            // attending a session adds +1 to both, absenting adds +1 to total.
+            final attended = entry.manualAttended.clamp(0, 999999);
+            final total = entry.manualTotal.clamp(attended, 999999);
+            if (total > 0) {
+              await (db.update(db.subjects)
+                    ..where((s) => s.id.equals(entry.subjectId)))
+                  .write(SubjectsCompanion(
+                    attendedClasses: Value(attended),
+                    totalClasses: Value(total),
+                    updatedAt: Value(nowMs),
+                  ));
+            }
+          } else {
+            // Method B: specific absent dates marked on a calendar.
+            // Per counting rule: absent → total +1, attended unchanged.
+            // Each absent date becomes one attendance_log row:
+            //   status='absent', session_id=NULL (no session created yet),
+            //   date=midnight UTC of the absent date.
+            // The total_classes counter is bumped once per absent row.
+            for (final absentDate in entry.absentDates) {
+              final dateMs = midnightUtc(absentDate);
+              await db.into(db.attendanceLogs).insertOnConflictUpdate(
+                AttendanceLogsCompanion.insert(
+                  id: const Uuid().v4(),
+                  subjectId: entry.subjectId,
+                  semesterId: semId,
+                  sessionId: const Value(null),
+                  status: 'absent',
+                  date: dateMs,
+                  startTime: const Value(null),
+                  endTime: const Value(null),
+                  isArchived: const Value(0),
+                  createdAt: nowMs,
+                ),
+              );
+            }
+            // Bump the total_classes counter by the number of absent dates.
+            final absentCount = entry.absentDates.length;
+            if (absentCount > 0) {
+              final subject = await (db.select(db.subjects)
+                    ..where((s) => s.id.equals(entry.subjectId)))
+                  .getSingleOrNull();
+              if (subject != null) {
+                await (db.update(db.subjects)
+                      ..where((s) => s.id.equals(entry.subjectId)))
+                    .write(SubjectsCompanion(
+                      // total += absentCount (attended is unchanged by absences)
+                      totalClasses:
+                          Value(subject.totalClasses + absentCount),
+                      updatedAt: Value(nowMs),
+                    ));
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // ── 5. app_settings — written AFTER the transaction ────────────────────
+    // This is the signal the router uses to transition to AppLifecycleReady.
+    // Writing it only after the transaction ensures all data exists before
+    // the user sees the dashboard.
+    await db.into(db.appSettings).insertOnConflictUpdate(
       AppSettingsCompanion(
         id: const Value(1),
         onboardingComplete: const Value(1),
         onboardingStep: const Value('complete'),
         activeSemesterId: Value(semId),
-        updatedAt: Value(now.millisecondsSinceEpoch),
+        updatedAt: Value(nowMs),
       ),
-    );
-  }
-
-  // ─── Resume (called on launch when onboardingComplete == false) ───────────
-
-  Future<void> restoreFromFirestore({
-    required String lastStep,
-    String? collegeName,
-    String? courseName,
-    String? semesterName,
-    double attendanceGoal = 75.0,
-  }) async {
-    final subjects = await _repo.getSubjects();
-    // Reload the active semester ID so holiday updates can persist after resume.
-    final semesterId = await _repo.getActiveSemesterId();
-    state = state.copyWith(
-      currentStep: lastStep,
-      collegeName: collegeName ?? '',
-      courseName: courseName ?? '',
-      semesterName: semesterName ?? '',
-      attendanceGoal: attendanceGoal,
-      subjects: subjects,
-      semesterId: semesterId,
     );
   }
 }

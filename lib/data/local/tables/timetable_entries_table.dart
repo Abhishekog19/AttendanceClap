@@ -44,7 +44,7 @@ class TimetableEntries extends Table {
   /// Room/location.
   TextColumn get room => text().nullable()();
 
-  /// OCR confidence score. Values below 0.7 are flagged as low-confidence.
+  /// Entry quality hint (0.0–1.0). Defaults to 1.0 for manually-entered slots.
   RealColumn get confidence => real().withDefault(const Constant(1.0))();
 
   /// Creation timestamp — Unix timestamp (ms).

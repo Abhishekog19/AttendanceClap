@@ -1,5 +1,5 @@
 class TimetableEntry {
-  /// Firestore document ID — null for in-memory / OCR-created entries.
+  /// Firestore / local DB ID. Null for in-memory entries not yet persisted.
   final String? id;
 
   /// Foreign key to the subjects collection.
@@ -71,7 +71,7 @@ class TimetableEntry {
         'confidence': confidence,
       };
 
-  /// Deserialise from a raw map (no doc ID — used for OCR / review).
+  /// Deserialise from a raw map (no doc ID).
   factory TimetableEntry.fromMap(Map<String, dynamic> map) => TimetableEntry(
         subjectId: map['subjectId'] as String?,
         subject: map['subject'] as String,
@@ -98,7 +98,7 @@ class TimetableEntry {
         confidence: (map['confidence'] as num?)?.toDouble() ?? 1.0,
       );
 
-  /// Parse from Groq API response: `{ "subject": ..., ... }` inside a day key.
+  /// Parse from an external map: `{ "subject": ..., ... }` keyed by field name.
   /// subjectId is resolved later in the save pipeline via createSubjectsFromTimetable.
   factory TimetableEntry.fromApiEntry(Map<String, dynamic> entry, String day) =>
       TimetableEntry(

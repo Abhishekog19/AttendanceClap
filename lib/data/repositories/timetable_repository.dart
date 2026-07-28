@@ -84,9 +84,9 @@ class TimetableRepository {
             .toList());
   }
 
-  // ── Save raw timetable entries (bulk — used by OCR pipeline) ─────────────
+  // ── Save raw timetable entries (bulk) ──────────────────────────────────────────
   //
-  // TASK 1: Entries are now saved with subjectId embedded.
+  // Entries are saved with subjectId embedded.
   // subjectIdMap (name → id) is built by createSubjectsFromTimetable and passed here.
 
   Future<void> saveTimetable(

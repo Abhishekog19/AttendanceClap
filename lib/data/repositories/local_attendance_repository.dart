@@ -124,6 +124,69 @@ class LocalAttendanceRepository {
   Future<int> generateSessionsForSemester(String semesterId) =>
       _generator.generateSessionsForSemester(semesterId);
 
+  /// Writes a semester row to local SQLite and inserts its holiday dates into
+  /// [semester_holidays]. Does NOT activate the semester (i.e. does NOT write
+  /// [app_settings.active_semester_id]). Call [activateSemester] after
+  /// confirming that session generation succeeded.
+  ///
+  /// Uses INSERT OR REPLACE so it is safe to call again if the user retries
+  /// after a partial failure. Holidays are inserted one-by-one inside a
+  /// transaction; the (semester_id, holiday_date) UNIQUE constraint on the
+  /// semester_holidays table prevents duplicates on re-runs.
+  ///
+  /// Call this BEFORE [generateSessionsForSemester] so the semester row exists.
+  Future<void> writeSemesterWithHolidays({
+    required String semesterId,
+    required String name,
+    required DateTime startDate,
+    required DateTime endDate,
+    required List<DateTime> holidays,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    // Normalise dates to midnight UTC (same convention as session_generator).
+    int midnightUtc(DateTime d) =>
+        DateTime.utc(d.year, d.month, d.day).millisecondsSinceEpoch;
+
+    await _db.transaction(() async {
+      // 1. Upsert semester row.
+      await _db.into(_db.semesters).insertOnConflictUpdate(
+            SemestersCompanion.insert(
+              id: semesterId,
+              name: Value(name.isNotEmpty ? name : null),
+              startDate: midnightUtc(startDate),
+              endDate: midnightUtc(endDate),
+              createdAt: now,
+              isActive: const Value(1),
+            ),
+          );
+
+      // 2. Insert holiday rows (unique constraint suppresses duplicates).
+      for (final h in holidays) {
+        await _db.into(_db.semesterHolidays).insertOnConflictUpdate(
+              SemesterHolidaysCompanion.insert(
+                semesterId: semesterId,
+                holidayDate: midnightUtc(h),
+              ),
+            );
+      }
+    });
+  }
+
+  /// Points [app_settings.active_semester_id] at [semesterId].
+  ///
+  /// Call this AFTER session generation succeeds so the router only transitions
+  /// to [AppLifecycleReady] once the semester is fully populated with sessions.
+  Future<void> activateSemester(String semesterId) async {
+    await _db.into(_db.appSettings).insertOnConflictUpdate(
+          AppSettingsCompanion(
+            id: const Value(1),
+            activeSemesterId: Value(semesterId),
+            updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+          ),
+        );
+  }
+
   // ── Counter delta helper ──────────────────────────────────────────────────
 
   /// Signed counter delta for a status transition.

@@ -91,12 +91,6 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
             tooltip: 'Manage Timetable',
             onPressed: () => context.push('/timetable/edit'),
           ),
-          // OCR import button — disabled until OCR feature is ready
-          // IconButton(
-          //   icon: Icon(Icons.document_scanner_outlined, color: onSurfaceVariant),
-          //   tooltip: 'Import Timetable',
-          //   onPressed: () => context.push('/timetable/upload'),
-          // ),
         ],
       ),
       body: todayAsync.when(

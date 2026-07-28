@@ -6,11 +6,10 @@ import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../data/repositories/timetable_repository.dart';
-import '../../../data/models/timetable_entry_model.dart';
-import '../../../data/services/historical_sync_service.dart';
+import '../../../core/router/app_lifecycle_state.dart' show appDatabaseProvider;
+import '../../../data/local/database.dart';
+import '../../../data/repositories/local_attendance_repository.dart';
 import '../providers/semester_provider.dart';
-import '../providers/timetable_ocr_provider.dart';
 
 class SemesterSetupScreen extends ConsumerWidget {
   const SemesterSetupScreen({super.key});
@@ -18,9 +17,10 @@ class SemesterSetupScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final semState = ref.watch(semesterNotifierProvider);
-    final entries = ref.watch(editedTimetableProvider).values
-        .expand((e) => e)
-        .toList();
+    final db = ref.watch(appDatabaseProvider);
+    // Count timetable entries saved in local SQLite to show in the banner.
+    final entryCountAsync = ref.watch(_localEntryCountProvider(db));
+    final entryCount = entryCountAsync.maybeWhen(data: (n) => n, orElse: () => 0);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primary = isDark ? AppColors.darkPrimary : AppColors.primary;
     final bg = isDark ? AppColors.darkSurface : AppColors.background;
@@ -30,13 +30,11 @@ class SemesterSetupScreen extends ConsumerWidget {
     final onSurfaceVariant =
         isDark ? AppColors.darkOnSurfaceVariant : AppColors.onSurfaceVariant;
 
-    final estimatedSessions =
-        ref.read(semesterNotifierProvider.notifier).estimateSessions(entries);
-
     // Navigate on success
     ref.listen(semesterNotifierProvider, (prev, next) {
       if (prev?.generatedCount == null && next.generatedCount != null) {
-        context.pushReplacement('/timetable/schedule-preview');
+        // Navigate back to timetable after generation completes.
+        context.go('/timetable');
       }
       if (next.error != null && prev?.error != next.error) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -155,8 +153,8 @@ class SemesterSetupScreen extends ConsumerWidget {
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: Text(
-                        '${semState.estimatedWeeks} weeks · ~$estimatedSessions sessions '
-                        'will be generated',
+                        '${semState.estimatedWeeks} weeks · '
+                         '$entryCount timetable slot${entryCount == 1 ? '' : 's'} found',
                         style: AppTextStyles.bodySm.copyWith(
                             color: Colors.green.shade700,
                             fontWeight: FontWeight.w600),
@@ -240,7 +238,7 @@ class SemesterSetupScreen extends ConsumerWidget {
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: semState.isValid
-                      ? () => _generate(ref, entries)
+                      ? () => _generate(ref)
                       : null,
                   icon: const Icon(Icons.rocket_launch),
                   label: const Text('Generate Semester Schedule'),
@@ -300,16 +298,25 @@ class SemesterSetupScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _generate(WidgetRef ref, List<TimetableEntry> entries) async {
-    final repo = ref.read(timetableRepositoryProvider);
-    final syncService = ref.read(historicalSyncServiceProvider);
-    await ref.read(semesterNotifierProvider.notifier).generateSchedule(
-          entries: entries,
-          repo: repo,
-          historicalSync: syncService,
+  Future<void> _generate(WidgetRef ref) async {
+    final localRepo = ref.read(localAttendanceRepositoryProvider);
+    await ref.read(semesterNotifierProvider.notifier).generateScheduleLocal(
+          localRepo: localRepo,
+          // Semester name is optional; the screen doesn't have a name field.
+          semesterName: '',
         );
   }
 }
+
+// ── Local entry count provider ────────────────────────────────────────────────
+
+/// Counts all [TimetableEntries] rows in the local SQLite database.
+/// Used by [SemesterSetupScreen] to display how many timetable slots are
+/// already saved before the user triggers session generation.
+final _localEntryCountProvider =
+    StreamProvider.family<int, AppDatabase>((ref, db) {
+  return db.select(db.timetableEntries).watch().map((rows) => rows.length);
+});
 
 // ── Date Picker Card ──────────────────────────────────────────────────────────
 
